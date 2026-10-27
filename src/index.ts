@@ -1,12 +1,14 @@
 import { Hono, type Context, type Next } from "hono";
 import { beginOAuth, checkShortcutToken, disconnect, finishOAuth, isLoggedIn, logout, redirectUri, rotateShortcutToken } from "./auth";
 import { AiLimitReached, correct, proposeTaxonomy, resetAutoClassifications } from "./classify";
-import { log, quotaUsedToday } from "./db";
+import { getSetting, log, quotaUsedToday } from "./db";
 import { now, type Env } from "./env";
-import { runStep, scheduled, startSync } from "./sync";
+import { approvePlan, buildPlan, cancelPlan, MAX_PLAN_ITEMS, openPlan, seedFromPlaylists, WRITE_UNITS, type Plan } from "./organize";
+import { startSync } from "./sync";
+import { runStep, scheduled } from "./work";
 import { submitVideo } from "./submit";
 import { CSS, esc, flash, JS, layout } from "./ui";
-import { DAILY_QUOTA, isConnected, QuotaExhausted, ReauthRequired } from "./youtube";
+import { canWrite, DAILY_QUOTA, isConnected, QUOTA_RESERVE, QuotaExhausted, ReauthRequired } from "./youtube";
 
 type App = { Bindings: Env };
 type C = Context<App>;
@@ -44,6 +46,8 @@ app.post("/share", async (c) => {
 });
 
 app.get("/auth/login", (c) => beginOAuth(c));
+// Guarded below: asks Google for playlist-management access on top of read-only.
+app.get("/auth/upgrade", (c) => beginOAuth(c, true));
 app.get("/auth/callback", async (c) => {
   const err = await finishOAuth(c);
   if (err) return c.html(layout("Sign-in problem", `${flash(err, "error")}<p><a class="btn" href="/auth/login">Try again</a></p>`, { nav: false }), 400);
@@ -64,7 +68,7 @@ async function guard(c: C, next: Next) {
   return next();
 }
 app.use("/", guard);
-for (const p of ["/videos/*", "/videos", "/categories/*", "/categories", "/add", "/logs", "/settings/*", "/settings", "/sync", "/api/*", "/auth/logout", "/auth/disconnect"]) {
+for (const p of ["/videos/*", "/videos", "/categories/*", "/categories", "/add", "/logs", "/settings/*", "/settings", "/sync", "/api/*", "/auth/logout", "/auth/disconnect", "/auth/upgrade", "/organize", "/organize/*"]) {
   app.use(p, guard);
 }
 
@@ -81,7 +85,7 @@ function landing(c: C): string {
 
 function friendly(err: unknown): string {
   if (err instanceof QuotaExhausted || err instanceof ReauthRequired || err instanceof AiLimitReached) return err.message;
-  return `Something went wrong: ${String(err).slice(0, 200)}`;
+  return err instanceof Error ? err.message.slice(0, 300) : `Something went wrong: ${String(err).slice(0, 200)}`;
 }
 
 const count = async (c: C, sql: string) => (await c.env.DB.prepare(sql).first<{ n: number }>())?.n ?? 0;
@@ -107,12 +111,18 @@ app.get("/", async (c) => {
   else if (active === 0 && proposed === 0) next = `<form method="post" action="/categories/propose"><button>Discover my categories</button></form>`;
   else if (active === 0) next = `<a class="btn" href="/categories">Review proposed categories</a>`;
   else if (review > 0) next = `<a class="btn" href="/videos?review=1">Review ${review} uncertain videos</a>`;
+  else {
+    const plan = await openPlan(c.env);
+    if (plan?.status === "draft") next = `<a class="btn" href="/organize">Review organize plan</a>`;
+    else if (plan) next = `<a class="btn" href="/organize">Organizing… see progress</a>`;
+    else if (!(await canWrite(c.env))) next = `<a class="btn" href="/organize">Organize into playlists</a>`;
+  }
 
   const body = `
     ${c.req.query("connected") ? flash("YouTube connected with read-only access.") : ""}
     ${flash(c.req.query("msg"))}${flash(c.req.query("err"), "error")}
     <div class="card"><div class="muted small">Account</div>
-      <div>${connected ? `${esc(acct?.channel_title ?? acct?.email)} <span class="pill">read-only</span>` : "Not connected"}</div></div>
+      <div>${connected ? `${esc(acct?.channel_title ?? acct?.email)} <span class="pill">${(await canWrite(c.env)) ? "can organize playlists" : "read-only"}</span>` : "Not connected"}</div></div>
     ${next ? `<div class="card"><div class="muted small">Next step</div><div style="margin-top:8px">${next}</div></div>` : ""}
     <div class="stats">
       <div class="card stat"><b>${videos}</b><span class="muted small">videos (${liked} liked)</span></div>
@@ -144,6 +154,8 @@ app.post("/api/step", async (c) => c.json(await runStep(c.env)));
 
 interface CatRow {
   id: number;
+  playlist_id: string | null;
+  seed_playlist_id: string | null;
   name: string;
   description: string;
   status: string;
@@ -153,12 +165,30 @@ interface CatRow {
 
 app.get("/categories", async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT cat.id, cat.name, cat.description, cat.status, cat.example_count,
+    `SELECT cat.id, cat.name, cat.description, cat.status, cat.example_count, cat.playlist_id, cat.seed_playlist_id,
        (SELECT COUNT(*) FROM classifications cl WHERE cl.category_id = cat.id) AS n
      FROM categories cat WHERE cat.status != 'archived' ORDER BY cat.status DESC, cat.name`,
   ).all<CatRow>();
   const proposed = results.filter((r) => r.status === "proposed");
   const active = results.filter((r) => r.status === "active");
+  const likes = await getSetting(c.env, "likes_playlist_id");
+  const { results: playlists } = await c.env.DB.prepare("SELECT id, title, item_count FROM playlists WHERE id != ? ORDER BY title COLLATE NOCASE")
+    .bind(likes ?? "")
+    .all<{ id: string; title: string; item_count: number | null }>();
+  const seeded = new Set(active.map((a) => a.seed_playlist_id).filter(Boolean));
+  const unseeded = playlists.filter((p) => !seeded.has(p.id));
+  const playlistOptions = (selected: string | null) =>
+    `<option value=""${selected ? "" : " selected"}>New private playlist (created when you approve a plan)</option>${playlists
+      .map((p) => `<option value="${esc(p.id)}"${p.id === selected ? " selected" : ""}>Your playlist: ${esc(p.title)}</option>`)
+      .join("")}`;
+
+  const seedHtml = unseeded.length
+    ? `<h2>Learn from my playlists</h2>
+       <form class="card" method="post" action="/categories/seed">
+         <p class="small muted">Each ticked playlist becomes a category. Its videos teach the sorter what belongs there, and organizing adds matching videos to that playlist (only after you approve a plan).</p>
+         ${unseeded.map((p) => `<label class="row"><input type="checkbox" name="playlist" value="${esc(p.id)}"> ${esc(p.title)} <span class="muted small">${p.item_count ?? 0} videos</span></label>`).join("")}
+         <p><button>Learn from ticked playlists</button></p></form>`
+    : "";
 
   const proposedHtml = proposed.length
     ? `<h2>Proposed: review before anything is sorted</h2>
@@ -179,7 +209,8 @@ app.get("/categories", async (c) => {
           (a) => `<div class="card"><form method="post" action="/categories/${a.id}/update">
             <input type="text" name="name" value="${esc(a.name)}" maxlength="60" aria-label="Name">
             <textarea name="description" maxlength="300" aria-label="Description">${esc(a.description)}</textarea>
-            <p class="muted small"><a href="/videos?cat=${a.id}">${a.n} videos</a> · learned from ${a.example_count} of your picks</p>
+            <label>Organize into</label><select name="playlist_id" aria-label="Organize into">${playlistOptions(a.playlist_id)}</select>
+            <p class="muted small"><a href="/videos?cat=${a.id}">${a.n} videos</a> · learned from ${a.example_count} examples${a.seed_playlist_id ? " · from your playlist" : ""}</p>
             <div class="row"><button class="secondary">Save</button>
             <button class="secondary" formaction="/categories/${a.id}/archive">Archive</button></div></form></div>`,
         )
@@ -189,7 +220,7 @@ app.get("/categories", async (c) => {
     : "";
 
   const body = `${flash(c.req.query("msg"))}${flash(c.req.query("err"), "error")}
-    ${proposedHtml}${activeHtml}
+    ${proposedHtml}${activeHtml}${seedHtml}
     <h2>Add a category</h2>
     <form class="card" method="post" action="/categories/add">
       <label for="n">Name</label><input id="n" type="text" name="name" maxlength="60" required>
@@ -230,6 +261,14 @@ app.post("/categories/approve", async (c) => {
   return c.redirect("/?msg=" + encodeURIComponent("Categories approved. Tap 'Run pending work' to sort your videos."));
 });
 
+app.post("/categories/seed", async (c) => {
+  const form = await c.req.parseBody({ all: true });
+  const ids = [form.playlist].flat().filter(Boolean).map(String);
+  if (ids.length === 0) return c.redirect("/categories?err=Tick+at+least+one+playlist");
+  const n = await seedFromPlaylists(c.env, ids);
+  return c.redirect("/?msg=" + encodeURIComponent(`Learning from ${n} playlists. Tap 'Run pending work' to analyze and re-sort.`));
+});
+
 app.post("/categories/add", async (c) => {
   const form = await c.req.parseBody();
   const name = clean(form.name, 60);
@@ -245,8 +284,10 @@ app.post("/categories/:id/update", async (c) => {
   const form = await c.req.parseBody();
   const name = clean(form.name, 60);
   if (!name) return c.redirect("/categories?err=Name+is+required");
-  const r = await c.env.DB.prepare("UPDATE OR IGNORE categories SET name = ?, description = ?, embedding = NULL WHERE id = ?")
-    .bind(name, clean(form.description, 300), id)
+  const pid = clean(form.playlist_id, 64);
+  const playlistId = pid && (await c.env.DB.prepare("SELECT 1 FROM playlists WHERE id = ?").bind(pid).first()) ? pid : null;
+  const r = await c.env.DB.prepare("UPDATE OR IGNORE categories SET name = ?, description = ?, playlist_id = ?, embedding = NULL WHERE id = ?")
+    .bind(name, clean(form.description, 300), playlistId, id)
     .run();
   return c.redirect("/categories?" + (r.meta.changes ? "msg=Saved" : "err=Name+already+used"));
 });
@@ -376,6 +417,172 @@ app.post("/add", async (c) => {
   }
 });
 
+// ---------- Organize (phase 2) ----------
+
+interface PlanItemView {
+  id: number;
+  action: string;
+  category_id: number;
+  video_id: string | null;
+  include: number;
+  status: string;
+  error: string | null;
+  cat_name: string;
+  playlist_id: string | null;
+  playlist_title: string | null;
+  title: string | null;
+  thumbnail: string | null;
+  confidence: number | null;
+  method: string | null;
+}
+
+async function planItems(c: C, planId: number) {
+  const { results } = await c.env.DB.prepare(
+    `SELECT pi.id, pi.action, pi.category_id, pi.video_id, pi.include, pi.status, pi.error, cat.name AS cat_name, cat.playlist_id,
+       pl.title AS playlist_title, v.title, v.thumbnail, cl.confidence, cl.method
+     FROM plan_items pi JOIN categories cat ON cat.id = pi.category_id
+     LEFT JOIN playlists pl ON pl.id = cat.playlist_id
+     LEFT JOIN videos v ON v.id = pi.video_id LEFT JOIN classifications cl ON cl.video_id = pi.video_id
+     WHERE pi.plan_id = ? ORDER BY cat.name COLLATE NOCASE, pi.action, pi.id`,
+  )
+    .bind(planId)
+    .all<PlanItemView>();
+  return results;
+}
+
+function groupByCategory(items: PlanItemView[]) {
+  const groups = new Map<number, { name: string; creates: boolean; target: string | null; adds: PlanItemView[] }>();
+  for (const it of items) {
+    let g = groups.get(it.category_id);
+    if (!g) {
+      g = { name: it.cat_name, creates: false, target: it.playlist_title, adds: [] };
+      groups.set(it.category_id, g);
+    }
+    if (it.action === "create_playlist") g.creates = true;
+    else g.adds.push(it);
+  }
+  return groups;
+}
+
+const estimate = (writes: number) => {
+  const perDay = Math.floor((DAILY_QUOTA - QUOTA_RESERVE - 300) / WRITE_UNITS);
+  const days = Math.max(1, Math.ceil(writes / perDay));
+  return `${writes} changes × ${WRITE_UNITS} quota units. YouTube allows about ${perDay} per day, so this takes ${days === 1 ? "under a day" : `about ${days} days`} (it continues automatically).`;
+};
+
+function draftView(plan: Plan, items: PlanItemView[]): string {
+  const groups = groupByCategory(items);
+  const adds = items.filter((i) => i.action === "add_video").length;
+  const creates = items.filter((i) => i.action === "create_playlist").length;
+  const cards = [...groups.entries()]
+    .map(([cid, g]) => {
+      const what = g.creates
+        ? `Create new <b>private</b> playlist “${esc(g.name)}” and add ${g.adds.length} videos`
+        : `Add ${g.adds.length} videos to your existing playlist “${esc(g.target ?? g.name)}”`;
+      const vids = g.adds
+        .map(
+          (v) => `<label class="video" style="grid-template-columns:28px 80px 1fr;margin:8px 0">
+            <input type="checkbox" name="item" value="${v.id}" checked>
+            ${v.thumbnail ? `<img src="${esc(v.thumbnail)}" alt="" loading="lazy" style="width:80px">` : `<img alt="" style="width:80px">`}
+            <span class="small">${esc(v.title)} <span class="pill">${v.method === "auto" ? `auto ${Math.round((v.confidence ?? 0) * 100)}%` : "your pick"}</span></span></label>`,
+        )
+        .join("");
+      return `<div class="card"><label class="row"><input type="checkbox" name="cat" value="${cid}" checked> <span>${what}</span></label>
+        <details><summary class="small muted">Review the ${g.adds.length} videos (untick any to leave them out)</summary>${vids}</details></div>`;
+    })
+    .join("");
+  return `<div class="card"><p><b>Plan #${plan.id}: nothing has changed on YouTube yet.</b></p>
+      <p class="small">${creates} new private playlists · ${adds} videos to add. Videos are only <b>added</b>: nothing is removed, moved, or deleted, and your liked videos stay liked.</p>
+      <p class="small muted">${estimate(adds + creates)} Uncertain videos are left out until you review them.</p></div>
+    <form method="post" action="/organize/${plan.id}/approve">${cards}
+      <div class="row"><button>Approve ticked changes</button></div></form>
+    <form method="post" action="/organize/${plan.id}/cancel" style="margin-top:8px"><button class="secondary">Discard plan</button></form>`;
+}
+
+function runningView(plan: Plan, items: PlanItemView[]): string {
+  const inc = items.filter((i) => i.include);
+  const count = (s: string) => inc.filter((i) => i.status === s).length;
+  const failed = inc.filter((i) => i.status === "failed");
+  return `<div class="card"><p><b>Plan #${plan.id} is ${plan.status === "approved" ? "starting" : "running"}.</b></p>
+      <div class="stats"><div class="stat"><b>${count("done")}</b><span class="muted small">done</span></div>
+      <div class="stat"><b>${count("pending")}</b><span class="muted small">to go</span></div>
+      <div class="stat"><b>${count("skipped")}</b><span class="muted small">already there</span></div>
+      <div class="stat"><b>${failed.length}</b><span class="muted small">failed</span></div></div>
+      <p class="small muted">${estimate(count("pending"))}</p>
+      <div class="row"><button id="runner" type="button">Run pending work</button></div>
+      <p id="runner-status" class="muted small">Runs every 30 minutes on its own, too.</p></div>
+    ${failed.length ? `<div class="card small"><b>Failures</b>${failed.map((f) => `<div class="log">${esc(f.title ?? f.cat_name)}: ${esc(f.error)}</div>`).join("")}</div>` : ""}
+    <form method="post" action="/organize/${plan.id}/cancel"><button class="secondary">Stop plan</button>
+    <p class="muted small">Stopping keeps the changes already made.</p></form>`;
+}
+
+app.get("/organize", async (c) => {
+  const msgs = `${flash(c.req.query("msg"))}${flash(c.req.query("err"), "error")}`;
+  if (!(await canWrite(c.env))) {
+    return c.html(
+      layout(
+        "Organize",
+        `${msgs}<div class="card"><p>To build playlists, the app needs permission to <b>manage</b> your YouTube playlists. Right now it can only read.</p>
+        <ul class="small"><li>It only <b>adds</b> videos to playlists. It never deletes, removes, or unlikes anything.</li>
+        <li>New playlists are always <b>private</b>.</li>
+        <li>Nothing changes until you approve a plan, and you can untick anything.</li></ul>
+        <p class="small muted">Google will show its consent screen again, this time with "Manage your YouTube account". That's the scope playlist editing requires; the app doesn't use it for anything else.</p>
+        <p><a class="btn" href="/auth/upgrade">Enable organizing</a></p></div>`,
+      ),
+    );
+  }
+  const plan = await openPlan(c.env);
+  if (plan) {
+    const items = await planItems(c, plan.id);
+    return c.html(layout("Organize", msgs + (plan.status === "draft" ? draftView(plan, items) : runningView(plan, items))));
+  }
+  const { results: past } = await c.env.DB.prepare(
+    `SELECT p.id, p.status, p.finished_at, SUM(pi.status = 'done' AND pi.action = 'add_video') AS added, SUM(pi.status = 'failed') AS failed
+     FROM plans p LEFT JOIN plan_items pi ON pi.plan_id = p.id WHERE p.status IN ('done', 'cancelled') GROUP BY p.id ORDER BY p.id DESC LIMIT 10`,
+  ).all<{ id: number; status: string; finished_at: number | null; added: number; failed: number }>();
+  return c.html(
+    layout(
+      "Organize",
+      `${msgs}<div class="card"><p>Build a plan from your sorted videos. You'll see every playlist and video before anything changes.</p>
+      <form method="post" action="/organize/build"><button>Build a plan</button></form>
+      <p class="small muted">A fresh draft is also prepared once a day for you to review. Up to ${MAX_PLAN_ITEMS} videos per plan.</p></div>
+      ${past.length ? `<h2>Past plans</h2><div class="card small">${past.map((p) => `<div class="log">#${p.id} · ${esc(p.status)} · ${p.added ?? 0} added${p.failed ? ` · ${p.failed} failed` : ""}</div>`).join("")}</div>` : ""}`,
+    ),
+  );
+});
+
+app.post("/organize/build", async (c) => {
+  try {
+    const r = await buildPlan(c.env);
+    if (!r.planId) return c.redirect("/organize?msg=" + encodeURIComponent("Nothing to organize: every confidently sorted video is already in its playlist."));
+    return c.redirect("/organize");
+  } catch (err) {
+    return c.redirect("/organize?err=" + encodeURIComponent(friendly(err)));
+  }
+});
+
+app.post("/organize/:id/approve", async (c) => {
+  const id = Number(c.req.param("id"));
+  const form = await c.req.parseBody({ all: true });
+  const items = new Set([form.item].flat().filter(Boolean).map(Number));
+  const cats = new Set([form.cat].flat().filter(Boolean).map(Number));
+  try {
+    const n = await approvePlan(c.env, id, items, cats);
+    if (n === 0) {
+      await cancelPlan(c.env, id);
+      return c.redirect("/organize?msg=" + encodeURIComponent("Nothing was ticked, so the plan was discarded."));
+    }
+    return c.redirect("/organize?msg=" + encodeURIComponent(`Approved ${n} videos. Tap 'Run pending work' or let it run on its own.`));
+  } catch (err) {
+    return c.redirect("/organize?err=" + encodeURIComponent(friendly(err)));
+  }
+});
+
+app.post("/organize/:id/cancel", async (c) => {
+  await cancelPlan(c.env, Number(c.req.param("id")));
+  return c.redirect("/organize?msg=Plan+stopped");
+});
+
 // ---------- Logs ----------
 
 app.get("/logs", async (c) => {
@@ -396,7 +603,7 @@ app.get("/logs", async (c) => {
 
 // ---------- Settings ----------
 
-function settingsPage(c: C, origin: string, token?: string): string {
+function settingsPage(c: C, origin: string, write: boolean, token?: string): string {
   const shareUrl = `${origin}/share`;
   return layout(
     "Settings",
@@ -416,21 +623,23 @@ function settingsPage(c: C, origin: string, token?: string): string {
     </div>
     <h2>Account</h2>
     <div class="card">
-      <p class="small">Access is read-only: this version cannot change your YouTube playlists.</p>
+      <p class="small">${write
+        ? "Access: read + manage playlists. The app only adds videos to playlists after you approve a plan."
+        : `Access: read-only. <a href="/organize">Enable organizing</a> to let it build playlists.`}</p>
       <div class="row"><form method="post" action="/auth/logout"><button class="secondary">Sign out</button></form>
       <form method="post" action="/auth/disconnect"><button class="danger">Disconnect YouTube</button></form></div>
-      <p class="muted small">Disconnect revokes this app's Google access and deletes the stored token. Your categories and labels stay.</p>
+      <p class="muted small">Disconnect revokes this app's Google access (including playlist management) and deletes the stored token. Your categories, labels, and YouTube playlists stay.</p>
     </div>
     <h2>Setup info</h2>
     <div class="card small">OAuth redirect URI: <code>${esc(redirectUri(c))}</code></div>`,
   );
 }
 
-app.get("/settings", (c) => c.html(settingsPage(c, new URL(c.req.url).origin)));
+app.get("/settings", async (c) => c.html(settingsPage(c, new URL(c.req.url).origin, await canWrite(c.env))));
 app.post("/settings/shortcut", async (c) => {
   const token = await rotateShortcutToken(c.env);
   c.header("cache-control", "no-store");
-  return c.html(settingsPage(c, new URL(c.req.url).origin, token));
+  return c.html(settingsPage(c, new URL(c.req.url).origin, await canWrite(c.env), token));
 });
 
 app.post("/auth/logout", (c) => {

@@ -1,6 +1,6 @@
 # Noxara YouTube Intelligence
 
-A private, standalone app that reads your YouTube likes and playlists, finds your interests, and sorts your videos into categories you approve. It learns from your corrections. You manage it entirely from an iPhone.
+A private, standalone app that reads your YouTube likes and playlists, finds your interests, sorts your videos into categories you approve, and, with your approval, organizes them into private playlists. It learns from your corrections. You manage it entirely from an iPhone.
 
 - **Setup (iPhone/Safari):** [docs/SETUP.md](docs/SETUP.md)
 - **Architecture and API limits:** [docs/PROPOSAL.md](docs/PROPOSAL.md)
@@ -15,7 +15,14 @@ A private, standalone app that reads your YouTube likes and playlists, finds you
 - Add videos by pasting a link or from the iOS Share Sheet through a Shortcut, with duplicate detection.
 - Scheduled sync (daily) and background sorting (every 30 minutes), with a full activity log and quota tracking.
 
-It **cannot change your YouTube account** in this version. Creating private playlists comes in phase 2, behind an approve-before-apply step.
+Phase 2 (organizing):
+
+- **Learn from your existing playlists**: each one you pick becomes a category, with its videos as examples.
+- Map categories to existing playlists or new **private** ones.
+- **Plan → approve → apply**: you see every playlist and video before anything changes, and can untick items. Unticked items aren't proposed again.
+- Writes only **add**. Nothing is ever removed, moved, unliked, or deleted.
+- Target playlists are re-read right before applying, so nothing gets added twice. Writes are paced by the daily quota (about 190 a day) and continue automatically.
+- Playlist-management access is requested only when you tap **Enable organizing**.
 
 ## Stack
 

@@ -29,7 +29,7 @@ export async function isConnected(env: Env): Promise<boolean> {
 
 async function refreshAccessToken(env: Env, row: TokenRow): Promise<string> {
   const refreshToken = await decrypt(env.APP_SECRET, row.refresh_token_enc);
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetch(env.GOOGLE_TOKEN_URL ?? TOKEN_URL, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -63,15 +63,26 @@ async function accessToken(env: Env, forceRefresh = false): Promise<string> {
   return refreshAccessToken(env, row);
 }
 
-/** GET a YouTube Data API resource, accounting quota and retrying once on an expired token. */
-export async function ytGet<T>(env: Env, resource: string, params: Record<string, string>, units = 1): Promise<T> {
+interface RequestOptions {
+  method?: "GET" | "POST";
+  body?: unknown;
+  units?: number;
+}
+
+/** Call the YouTube Data API, accounting quota and retrying once on an expired token. */
+export async function ytRequest<T>(env: Env, resource: string, params: Record<string, string>, opts: RequestOptions = {}): Promise<T> {
+  const units = opts.units ?? 1;
   if ((await quotaUsedToday(env)) + units > DAILY_QUOTA - QUOTA_RESERVE) {
     throw new QuotaExhausted("Daily YouTube quota budget reached; work resumes after midnight Pacific time.");
   }
-  const url = `${API}/${resource}?${new URLSearchParams(params)}`;
+  const url = `${env.YT_API_BASE ?? API}/${resource}?${new URLSearchParams(params)}`;
   let token = await accessToken(env);
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+    const res = await fetch(url, {
+      method: opts.method ?? "GET",
+      headers: { authorization: `Bearer ${token}`, ...(opts.body ? { "content-type": "application/json" } : {}) },
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
     await addQuota(env, units);
     if (res.ok) return (await res.json()) as T;
 
@@ -83,7 +94,11 @@ export async function ytGet<T>(env: Env, resource: string, params: Record<string
     if (res.status === 403 && /quotaExceeded|dailyLimitExceeded/.test(text)) {
       throw new QuotaExhausted("YouTube reported the daily quota is exhausted.");
     }
-    if (res.status >= 500 && attempt < 2) {
+    if (res.status === 403 && /insufficientPermissions|ACCESS_TOKEN_SCOPE_INSUFFICIENT/.test(text)) {
+      throw new ReauthRequired("Organizing needs permission to manage playlists. Tap 'Enable organizing' in Settings.");
+    }
+    // Writes are not retried on 5xx: the change may have gone through, and a retry could duplicate it.
+    if (res.status >= 500 && attempt < 2 && (opts.method ?? "GET") === "GET") {
       await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
       continue;
     }
@@ -91,6 +106,8 @@ export async function ytGet<T>(env: Env, resource: string, params: Record<string
   }
   throw new YouTubeError(`YouTube ${resource} failed after retries`, 0);
 }
+
+export const ytGet = <T>(env: Env, resource: string, params: Record<string, string>, units = 1) => ytRequest<T>(env, resource, params, { units });
 
 export interface Page<T> {
   items: T[];
@@ -152,6 +169,30 @@ export const listPlaylistItems = (env: Env, playlistId: string, pageToken?: stri
 /** Up to 50 ids per call, 1 unit. */
 export const getVideos = (env: Env, ids: string[]) =>
   ytGet<Page<VideoResource>>(env, "videos", { part: "snippet,contentDetails", id: ids.join(","), maxResults: "50" });
+
+/** Create a private playlist (50 units). */
+export const createPrivatePlaylist = (env: Env, title: string, description: string) =>
+  ytRequest<PlaylistResource>(env, "playlists", { part: "snippet,status" }, {
+    method: "POST",
+    units: 50,
+    body: { snippet: { title: title.slice(0, 150), description: description.slice(0, 5000) }, status: { privacyStatus: "private" } },
+  });
+
+/** Append a video to a playlist (50 units). Never removes or reorders anything. */
+export const addToPlaylist = (env: Env, playlistId: string, videoId: string) =>
+  ytRequest<{ id: string }>(env, "playlistItems", { part: "snippet" }, {
+    method: "POST",
+    units: 50,
+    body: { snippet: { playlistId, resourceId: { kind: "youtube#video", videoId } } },
+  });
+
+export const WRITE_SCOPE = "https://www.googleapis.com/auth/youtube";
+
+/** Whether the stored grant includes playlist management (not just youtube.readonly). */
+export async function canWrite(env: Env): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT scope FROM oauth_tokens WHERE id = 1").first<{ scope: string | null }>();
+  return (row?.scope ?? "").split(/\s+/).includes(WRITE_SCOPE);
+}
 
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 

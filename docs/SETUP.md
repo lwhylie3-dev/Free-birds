@@ -39,7 +39,7 @@ Use a **new, dedicated** Google Cloud project. Don't reuse one from another app.
    - App name `Noxara YT`, support email = your email.
    - Audience: **External**.
    - Contact email = your email → agree → **Create**.
-5. **Data Access → Add or remove scopes**: tick `.../auth/youtube.readonly`, `openid`, and `.../auth/userinfo.email` → **Update → Save**.
+5. **Data Access → Add or remove scopes**: tick `.../auth/youtube.readonly`, `openid`, `.../auth/userinfo.email`, and `.../auth/youtube` (the last one is needed only for organizing playlists) → **Update → Save**.
 6. **Audience → Publish app → Confirm**, so the status says **In production**.
    *Why:* in "Testing" mode Google expires the login after 7 days, which breaks the scheduled sync. The app stays private to you because only your email is allowed in (step 3.8). Google will show a **"Google hasn't verified this app"** screen when you sign in. Tap **Advanced → Go to Noxara YT**. That's expected for a personal app.
 7. **Clients → Create client** → type **Web application**, name `noxara-yt`.
@@ -60,7 +60,19 @@ Use a **new, dedicated** Google Cloud project. Don't reuse one from another app.
 4. Fix any wrong labels on **Videos** (or tap *Looks right*). Each pick teaches the sorter.
 5. After that, it syncs by itself every day and keeps sorting new likes every 30 minutes.
 
-## Step 5: Share Sheet shortcut (optional, recommended)
+## Step 5: Organize into playlists (phase 2)
+
+1. In the app, open **Categories → Learn from my playlists**. Tick playlists that are real topics (for example *Naruto*, *Mad funny*, *Songs to save*) and tap **Learn**. Their videos teach the sorter, and matching videos will go into those same playlists.
+2. Point any other category at an existing playlist, or leave it on **New private playlist**.
+3. Open **Organize → Enable organizing**. Google asks once more, now for "Manage your YouTube account", which playlist editing requires.
+4. Tap **Build a plan**. You'll see every playlist that would be created and every video that would be added. Untick anything you don't want, then **Approve**.
+5. It re-reads your playlists (so nothing gets added twice) and works through the plan. Watch **Run pending work**, or leave it: it continues every 30 minutes and pauses when the daily YouTube quota runs out.
+
+Rules it always follows: it only **adds** videos, new playlists are **private**, it never removes, moves, unlikes, or deletes anything, and nothing happens without your approval. Videos you untick aren't suggested again. A fresh draft plan is prepared daily for you to review.
+
+Not reachable through YouTube's API: **Watch Later**, **Saved Shorts**, and watch history.
+
+## Step 6: Share Sheet shortcut (optional, recommended)
 
 Go to **Settings** in the app and follow the on-screen steps. You create a token there and build a tiny Shortcut called **Send to Noxara**. Then in the YouTube app: **Share → More → Send to Noxara**, and the video is added and sorted.
 

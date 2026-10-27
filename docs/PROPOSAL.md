@@ -1,6 +1,6 @@
 # Noxara YouTube Intelligence: Architecture Proposal
 
-Status: **approved. MVP v0.1 is implemented** (see `README.md` and `docs/SETUP.md`).
+Status: **approved. MVP v0.1 and phase 2 (approved playlist organizing) are implemented** (see `README.md` and `docs/SETUP.md`).
 
 > **Change after approval:** the owner chose an all-free route. Classification uses **Cloudflare Workers AI** (free daily allowance) instead of the paid Claude API: embeddings plus nearest-prototype matching, and an LLM only for proposing categories. A Claude-powered classifier can be added later as an opt-in.
 

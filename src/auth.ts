@@ -3,7 +3,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { decrypt, encrypt, fromB64Url, randomToken, sha256Hex, sign, timingSafeEqual, toB64Url, verify } from "./crypto";
 import { getSetting, log, setSetting } from "./db";
 import { now, type Env } from "./env";
-import { TOKEN_URL } from "./youtube";
+import { canWrite, TOKEN_URL, WRITE_SCOPE } from "./youtube";
 
 export const SCOPES = ["openid", "email", "https://www.googleapis.com/auth/youtube.readonly"];
 const SESSION_COOKIE = "nx_session";
@@ -34,8 +34,12 @@ export function logout(c: C): void {
   deleteCookie(c, SESSION_COOKIE, { path: "/" });
 }
 
-/** Redirect to Google's consent page (authorization code + PKCE). */
-export async function beginOAuth(c: C): Promise<Response> {
+/**
+ * Redirect to Google's consent page (authorization code + PKCE).
+ * Playlist-management access is only requested when organizing is being enabled or already was.
+ */
+export async function beginOAuth(c: C, wantWrite = false): Promise<Response> {
+  const scopes = wantWrite || (await canWrite(c.env)) ? [...SCOPES, WRITE_SCOPE] : SCOPES;
   const state = randomToken(16);
   const verifier = randomToken(48);
   const challenge = toB64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
@@ -47,7 +51,7 @@ export async function beginOAuth(c: C): Promise<Response> {
     client_id: c.env.GOOGLE_CLIENT_ID,
     redirect_uri: redirectUri(c),
     response_type: "code",
-    scope: SCOPES.join(" "),
+    scope: scopes.join(" "),
     access_type: "offline",
     prompt: "consent",
     include_granted_scopes: "true",
@@ -78,7 +82,7 @@ export async function finishOAuth(c: C): Promise<string | null> {
   if (error) return `Google returned: ${error}`;
   if (!code || !state || saved.exp < now() || !timingSafeEqual(state, saved.state)) return "Sign-in check failed. Please try again.";
 
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetch(c.env.GOOGLE_TOKEN_URL ?? TOKEN_URL, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -118,13 +122,14 @@ export async function finishOAuth(c: C): Promise<string | null> {
       .bind(claims.email, tok.scope ?? null, await encrypt(c.env.APP_SECRET, tok.refresh_token), accessEnc, expiresAt, t)
       .run();
   } else {
-    const updated = await c.env.DB.prepare("UPDATE oauth_tokens SET access_token_enc = ?, access_expires_at = ?, updated_at = ? WHERE id = 1")
-      .bind(accessEnc, expiresAt, t)
+    const updated = await c.env.DB.prepare("UPDATE oauth_tokens SET scope = ?, access_token_enc = ?, access_expires_at = ?, updated_at = ? WHERE id = 1")
+      .bind(tok.scope ?? null, accessEnc, expiresAt, t)
       .run();
     if (!updated.meta.changes) return "Google didn't return a refresh token. Remove the app's access at myaccount.google.com/permissions and try again.";
   }
   await startSession(c);
-  await log(c.env, "auth", "ok", "YouTube connected (read-only).");
+  const write = (tok.scope ?? "").split(/\s+/).includes(WRITE_SCOPE);
+  await log(c.env, "auth", "ok", write ? "YouTube connected with playlist-management access." : "YouTube connected (read-only).");
   return null;
 }
 

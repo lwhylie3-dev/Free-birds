@@ -9,6 +9,9 @@ export interface Env {
   GOOGLE_CLIENT_SECRET: string;
   OWNER_EMAIL: string;
   APP_SECRET: string;
+  /** Optional overrides, used only for local testing against a mock server. */
+  YT_API_BASE?: string;
+  GOOGLE_TOKEN_URL?: string;
 }
 
 export const now = () => Date.now();

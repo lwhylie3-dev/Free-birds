@@ -62,6 +62,7 @@ export async function submitVideo(env: Env, input: string): Promise<SubmitResult
     await log(env, "submit", "warn", `Saved ${videoId}; analysis deferred: ${String(err).slice(0, 200)}`);
   }
   const d = await describe(env, videoId);
+  const hasCategories = (await env.DB.prepare("SELECT 1 FROM categories WHERE status = 'active' LIMIT 1").first()) !== null;
   await log(env, "submit", "ok", `Added "${video.snippet.title}"${d?.category ? ` → ${d.category}` : ""}.`, 1);
   return {
     ok: true,
@@ -70,6 +71,10 @@ export async function submitVideo(env: Env, input: string): Promise<SubmitResult
     title: video.snippet.title,
     category: d?.category ?? null,
     confidence: d?.confidence ?? undefined,
-    message: d?.category ? `Added to ${d.category}.` : "Added. It will be sorted once categories are approved.",
+    message: d?.category
+      ? `Added and sorted into ${d.category}.`
+      : hasCategories
+        ? "Added. It'll be sorted within 30 minutes."
+        : "Added. It'll be sorted once you approve categories.",
   };
 }

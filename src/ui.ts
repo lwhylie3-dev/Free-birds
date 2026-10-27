@@ -12,7 +12,7 @@ export function esc(value: unknown): string {
 export function layout(title: string, body: string, opts: { nav?: boolean } = {}): string {
   const nav = opts.nav === false
     ? ""
-    : `<nav><a href="/">Home</a><a href="/videos">Videos</a><a href="/categories">Categories</a><a href="/add">Add</a><a href="/logs">Logs</a><a href="/settings">Settings</a></nav>`;
+    : `<nav><a href="/">Home</a><a href="/videos">Videos</a><a href="/categories">Categories</a><a href="/organize">Organize</a><a href="/add">Add</a><a href="/logs">Logs</a><a href="/settings">Settings</a></nav>`;
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
