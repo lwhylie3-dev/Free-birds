@@ -1,0 +1,21 @@
+name = "noxara-yt"
+main = "src/index.ts"
+compatibility_date = "2025-10-01"
+workers_dev = true
+
+# Every 30 minutes: continue pending work; a fresh full sync starts once a day.
+[triggers]
+crons = ["*/30 * * * *"]
+
+[ai]
+binding = "AI"
+
+# The deploy workflow finds or creates this database and fills in the id.
+[[d1_databases]]
+binding = "DB"
+database_name = "noxara-yt"
+database_id = "REPLACE_WITH_D1_ID"
+migrations_dir = "migrations"
+
+# Secrets (set by the deploy workflow, never committed):
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, OWNER_EMAIL, APP_SECRET

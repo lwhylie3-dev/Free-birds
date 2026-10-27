@@ -1,6 +1,8 @@
 # Noxara YouTube Intelligence: Architecture Proposal
 
-Status: **proposal only, waiting for owner approval.** Nothing below is implemented yet.
+Status: **approved. MVP v0.1 is implemented** (see `README.md` and `docs/SETUP.md`).
+
+> **Change after approval:** the owner chose an all-free route. Classification uses **Cloudflare Workers AI** (free daily allowance) instead of the paid Claude API: embeddings plus nearest-prototype matching, and an LLM only for proposing categories. A Claude-powered classifier can be added later as an opt-in.
 
 ## 0. Independence
 
@@ -37,7 +39,6 @@ Why this stack:
 |---|---|---|
 | Google Cloud project (new, dedicated) | YouTube Data API v3 + OAuth client | Free. API quota isn't billed. |
 | Cloudflare account | Worker, D1, Cron, secrets | Free tier is enough. Workers Paid is $5/mo only if you outgrow it. |
-| Anthropic API key (Console) | Classification | Pay per use, see §6 |
 | GitHub (this repo) | Code + CI deploy | Free |
 
 ## 3. Authentication
