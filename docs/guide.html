@@ -1,0 +1,336 @@
+<title>Noxara YT Field Guide</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: one phone-width column; a forge-ember accent; numbered steps only where order matters. */
+:root {
+  --bg: #f5f3f1;
+  --surface: #ffffff;
+  --ink: #1d1a18;
+  --muted: #6b635d;
+  --line: #e4ded8;
+  --ember: #d2461e;
+  --ember-soft: #fbe6dd;
+  --ok: #1f7a4a;
+  --ok-soft: #e1f2e8;
+  --no: #a8321f;
+  --font-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --font-body: "Atkinson Hyperlegible", -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141110; --surface: #1d1917; --ink: #f1ece8; --muted: #a59b94; --line: #332c28;
+    --ember: #ff7a4d; --ember-soft: #3a2119; --ok: #5fd08f; --ok-soft: #173126; --no: #ff8a75;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141110; --surface: #1d1917; --ink: #f1ece8; --muted: #a59b94; --line: #332c28;
+  --ember: #ff7a4d; --ember-soft: #3a2119; --ok: #5fd08f; --ok-soft: #173126; --no: #ff8a75;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 17px/1.55 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 56px;
+}
+.wrap { max-width: 640px; margin: 0 auto; display: grid; gap: 40px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.12; }
+h1 { font-size: clamp(2rem, 8vw, 2.9rem); font-weight: 800; letter-spacing: -0.02em; }
+h2 { font-size: 1.55rem; font-weight: 800; letter-spacing: -0.01em; }
+h3 { font-size: 1.1rem; font-weight: 600; }
+p { margin: 0; }
+section { display: grid; gap: 14px; }
+.eyebrow { font: 500 0.72rem/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ember); }
+.lede { font-size: 1.12rem; color: var(--muted); }
+.muted { color: var(--muted); }
+.small { font-size: 0.9rem; }
+code, .mono { font-family: var(--font-mono); font-size: 0.85em; background: var(--surface); border: 1px solid var(--line); padding: 1px 6px; border-radius: 6px; overflow-wrap: anywhere; }
+strong { font-weight: 700; }
+
+/* Hero */
+header { display: grid; gap: 14px; padding-top: 8px; }
+.tldr { background: var(--ember-soft); border-radius: 14px; padding: 16px 18px; display: grid; gap: 6px; }
+.tldr b { color: var(--ember); }
+
+/* Map diagram */
+.map { display: grid; gap: 0; }
+.node { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: grid; gap: 4px; }
+.node.hot { border-color: var(--ember); border-width: 2px; }
+.node .who { font: 500 0.7rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.link { display: grid; grid-template-columns: 24px 1fr; gap: 10px; align-items: center; padding: 6px 0 6px 18px; }
+.link .bar { width: 2px; height: 34px; background: var(--ember); margin-left: 11px; border-radius: 2px; }
+.link span { font-size: 0.88rem; color: var(--muted); }
+
+/* Loop list */
+.loop { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; counter-reset: s; }
+.loop li { display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: start; }
+.loop li::before {
+  counter-increment: s; content: counter(s);
+  width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--ink); color: var(--bg); font: 700 0.9rem/1 var(--font-mono);
+}
+.loop li > div { display: grid; gap: 2px; min-width: 0; padding-top: 4px; }
+.when { font: 500 0.72rem/1.3 var(--font-mono); color: var(--ember); letter-spacing: 0.04em; }
+
+/* Checklist */
+.check { display: grid; gap: 8px; }
+.check label {
+  display: grid; grid-template-columns: 26px 1fr; gap: 12px; align-items: start;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 13px 14px; cursor: pointer;
+}
+.check input { width: 22px; height: 22px; margin: 2px 0 0; accent-color: var(--ember); }
+.check label:has(input:checked) { border-color: var(--ok); background: var(--ok-soft); }
+.check label:has(input:checked) .t { text-decoration: line-through; text-decoration-color: var(--muted); }
+.check .t { font-weight: 700; }
+.check .d { display: block; font-size: 0.9rem; color: var(--muted); margin-top: 2px; }
+.progress { display: flex; align-items: center; gap: 12px; }
+.progress .track { flex: 1; height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; }
+.progress .fill { height: 100%; width: 0; background: var(--ok); transition: width .25s; }
+.progress output { font: 500 0.85rem/1 var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Phone mock for the Share Sheet */
+.phone { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 16px; display: grid; gap: 12px; }
+.sheet-row { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.app { flex: none; width: 64px; display: grid; gap: 6px; justify-items: center; font-size: 0.7rem; color: var(--muted); text-align: center; }
+.app i { width: 52px; height: 52px; border-radius: 13px; background: var(--line); display: block; }
+.action { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-radius: 12px; background: var(--bg); font-weight: 700; }
+.action.hot { background: var(--ember); color: #fff; }
+.action small { font: 500 0.7rem/1 var(--font-mono); opacity: 0.85; }
+.notif { display: grid; gap: 2px; background: var(--bg); border-radius: 14px; padding: 10px 14px; border: 1px solid var(--line); }
+.notif .who { font: 500 0.7rem/1 var(--font-mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* Shortcut builder */
+.steps { margin: 0; padding-left: 1.3em; display: grid; gap: 10px; }
+.steps li { padding-left: 4px; }
+.field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 8px 8px 12px; margin-top: 6px; }
+.field span { font-family: var(--font-mono); font-size: 0.8rem; overflow-wrap: anywhere; min-width: 0; }
+button.copy { font: 700 0.8rem/1 var(--font-body); border: 0; border-radius: 8px; padding: 9px 12px; background: var(--ink); color: var(--bg); cursor: pointer; min-height: 36px; }
+button.copy:focus-visible, .check input:focus-visible { outline: 3px solid var(--ember); outline-offset: 2px; }
+
+/* Can / can't */
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.col { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 10px; align-content: start; }
+.col ul { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; }
+.col.yes h3 { color: var(--ok); }
+.col.no h3 { color: var(--no); }
+
+/* Quota meter */
+.quota { display: grid; gap: 8px; }
+.qbar { display: flex; height: 26px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
+.qbar div { display: grid; place-items: center; font: 500 0.68rem/1 var(--font-mono); color: #fff; white-space: nowrap; overflow: hidden; }
+.qkey { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.85rem; color: var(--muted); }
+.qkey i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+details { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+details + details { margin-top: 8px; }
+summary { cursor: pointer; font-weight: 700; }
+details p { margin-top: 8px; color: var(--muted); }
+footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
+@media (prefers-reduced-motion: reduce) { .progress .fill { transition: none; } }
+</style>
+
+<div class="wrap">
+
+<header>
+  <span class="eyebrow">Your private YouTube organizer</span>
+  <h1>How Noxara YT works</h1>
+  <p class="lede">A small web app of your own that reads your liked videos and playlists, learns what you're into, and sorts videos into private playlists. You approve every change first.</p>
+  <div class="tldr">
+    <p><b>Short version:</b> you don't install anything inside the YouTube app.</p>
+    <p>The playlists Noxara makes are ordinary YouTube playlists, so they show up in the YouTube app's <strong>You → Playlists</strong> tab like any other. To send it a video, you tap <strong>Share</strong> in YouTube and pick <strong>Send to Noxara</strong>.</p>
+  </div>
+</header>
+
+<section>
+  <span class="eyebrow">The pieces</span>
+  <h2>Who talks to whom</h2>
+  <div class="map" role="img" aria-label="Diagram: iPhone YouTube app and Noxara web app connect through Google's official YouTube API">
+    <div class="node">
+      <span class="who">On your iPhone</span>
+      <h3>YouTube app + Noxara home-screen app</h3>
+      <p class="small muted">You watch in YouTube as usual. Noxara is a web page saved to your Home Screen.</p>
+    </div>
+    <div class="link"><div class="bar"></div><span>Share button → Shortcut sends the video link</span></div>
+    <div class="node hot">
+      <span class="who">Free, on Cloudflare</span>
+      <h3>Your Noxara server</h3>
+      <p class="small muted">Stores your categories, sorts videos with free AI, and runs every 30 minutes on its own. Only your email can sign in.</p>
+    </div>
+    <div class="link"><div class="bar"></div><span>Official YouTube API, with Google sign-in (never your password)</span></div>
+    <div class="node">
+      <span class="who">Google</span>
+      <h3>Your YouTube account</h3>
+      <p class="small muted">Likes and playlists are read here. Approved videos get added to private playlists here, and the YouTube app shows them right away.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Day to day</span>
+  <h2>What happens, in order</h2>
+  <ol class="loop">
+    <li><div><span class="when">You, anytime</span><h3>Like or share a video</h3><p class="small muted">Liking works on its own. Sharing to Noxara sorts it instantly and tells you which category it landed in.</p></div></li>
+    <li><div><span class="when">Every 30 min</span><h3>Noxara picks up new likes</h3><p class="small muted">It reads the title, channel, tags and description, then matches the video to the closest category.</p></div></li>
+    <li><div><span class="when">When it's unsure</span><h3>It asks you</h3><p class="small muted">Low-confidence videos land in "Needs review". Picking the right category teaches it for next time.</p></div></li>
+    <li><div><span class="when">Once a day</span><h3>It drafts a plan</h3><p class="small muted">A list of exactly which videos would go into which playlists. Nothing changes yet.</p></div></li>
+    <li><div><span class="when">You approve</span><h3>Untick anything, then approve</h3><p class="small muted">It re-checks your playlists so nothing is added twice, then adds the approved videos.</p></div></li>
+    <li><div><span class="when">In the YouTube app</span><h3>Open You → Playlists</h3><p class="small muted">Your organized playlists are there, private, ready to play.</p></div></li>
+  </ol>
+</section>
+
+<section>
+  <span class="eyebrow">One-time setup · about 30 min in Safari</span>
+  <h2>Setup checklist</h2>
+  <p class="small muted">Ticks are saved on this device only. Detailed steps for 1–3 are in <code>docs/SETUP.md</code> in your GitHub repo.</p>
+  <div class="progress"><div class="track"><div class="fill" id="fill"></div></div><output id="count">0 / 8</output></div>
+  <div class="check" id="checklist">
+    <label><input type="checkbox" id="c1"><span><span class="t">Make a free Cloudflare account</span><span class="d">Copy your Account ID and create an API token ("Edit Cloudflare Workers" + D1 Edit).</span></span></label>
+    <label><input type="checkbox" id="c2"><span><span class="t">Add 2 secrets in GitHub, run "Check and deploy"</span><span class="d">CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID, under the repo's Settings → Secrets → Actions. Then open the Actions tab and run the workflow.</span></span></label>
+    <label><input type="checkbox" id="c3"><span><span class="t">Make a Google Cloud project + sign-in client</span><span class="d">Enable YouTube Data API v3, publish the consent screen to <strong>In production</strong>, add the 3 Google secrets (client ID, client secret, your email), and run the workflow again.</span></span></label>
+    <label><input type="checkbox" id="c4"><span><span class="t">Open your app and sign in</span><span class="d">At noxara-yt.&lt;you&gt;.workers.dev. Tap "Advanced → Go to Noxara YT" on Google's unverified-app screen. That's normal for a personal app.</span></span></label>
+    <label><input type="checkbox" id="c5"><span><span class="t">Add it to your Home Screen</span><span class="d">Safari → Share → Add to Home Screen. Now it opens like an app.</span></span></label>
+    <label><input type="checkbox" id="c6"><span><span class="t">Import, then learn from your playlists</span><span class="d">Overview → Import. Then Categories → tick Naruto, Mad funny, Songs to save, etc. → Learn. Then Run pending work.</span></span></label>
+    <label><input type="checkbox" id="c7"><span><span class="t">Enable organizing, build your first plan</span><span class="d">Organize → Enable organizing → Build a plan → review → Approve.</span></span></label>
+    <label><input type="checkbox" id="c8"><span><span class="t">Set up the Share Sheet shortcut</span><span class="d">Steps below. This is the part that ties Noxara to the YouTube app.</span></span></label>
+  </div>
+</section>
+
+<section id="shortcut">
+  <span class="eyebrow">The YouTube app connection</span>
+  <h2>Send videos straight from YouTube</h2>
+  <p>Apple doesn't let web apps appear in the Share Sheet directly, so a tiny Shortcut does the hand-off. You build it once in the <strong>Shortcuts</strong> app (already on your iPhone).</p>
+
+  <h3>First, get your token</h3>
+  <p class="small">In Noxara, open <strong>Settings → Create new token</strong> and copy it. Treat it like a password. If it ever leaks, tap the button again and the old one stops working.</p>
+
+  <h3>Build the shortcut</h3>
+  <ol class="steps">
+    <li>Open <strong>Shortcuts</strong> → tap <strong>+</strong> → rename it <strong>Send to Noxara</strong>.</li>
+    <li>Tap the <strong>ⓘ</strong> (or the name at the top) → turn on <strong>Show in Share Sheet</strong>. Set it to receive <strong>URLs</strong> and <strong>Text</strong>.</li>
+    <li>Add the action <strong>Get Contents of URL</strong>. Set the URL to your app's address plus <code>/share</code>:
+      <div class="field"><span>https://noxara-yt.YOUR-SUBDOMAIN.workers.dev/share</span><button class="copy" type="button" data-copy="https://noxara-yt.YOUR-SUBDOMAIN.workers.dev/share">Copy</button></div>
+      <p class="small muted">Swap YOUR-SUBDOMAIN for yours. The exact address is shown on Noxara's Settings page.</p>
+    </li>
+    <li>Tap <strong>Show More</strong> on that action. Method: <strong>POST</strong>.</li>
+    <li>Headers → <strong>Add new header</strong>. Key:
+      <div class="field"><span>Authorization</span><button class="copy" type="button" data-copy="Authorization">Copy</button></div>
+      Value: the word <code>Bearer</code>, a space, then your token.
+      <div class="field"><span>Bearer YOUR_TOKEN</span><button class="copy" type="button" data-copy="Bearer ">Copy "Bearer "</button></div>
+    </li>
+    <li>Request Body: <strong>JSON</strong> → add a <strong>Text</strong> field. Key <code>url</code>, value <strong>Shortcut Input</strong> (pick it from the variables bar).</li>
+    <li>Add <strong>Get Dictionary Value</strong>: key <code>message</code>, from <strong>Contents of URL</strong>.</li>
+    <li>Add <strong>Show Notification</strong> with the <strong>Dictionary Value</strong>. Tap <strong>Done</strong>.</li>
+  </ol>
+
+  <h3>Using it in the YouTube app</h3>
+  <div class="phone" aria-label="Illustration of the iPhone Share Sheet">
+    <p class="small muted">On any video or Short: tap <strong>Share</strong> → scroll the bottom row → <strong>More</strong>. You'll see:</p>
+    <div class="sheet-row" aria-hidden="true">
+      <div class="app"><i></i>Messages</div><div class="app"><i></i>Mail</div><div class="app"><i></i>Notes</div><div class="app"><i></i>More</div>
+    </div>
+    <div class="action"><span>Copy</span></div>
+    <div class="action hot"><span>Send to Noxara</span><small>SHORTCUT</small></div>
+    <div class="notif" aria-label="Example notification">
+      <span class="who">Shortcuts · now</span>
+      <span>Added and sorted into Mad funny.</span>
+    </div>
+  </div>
+  <p class="small muted">Tip: in the Share Sheet, tap <strong>Edit Actions</strong> and add Send to Noxara to Favorites so it sits near the top. If you share a video you already have, it tells you where it is instead of adding it twice.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Limits</span>
+  <h2>What it can and can't touch</h2>
+  <div class="split">
+    <div class="col yes">
+      <h3>Can</h3>
+      <ul>
+        <li>Read your liked videos and your playlists</li>
+        <li>Create new <strong>private</strong> playlists</li>
+        <li>Add videos to playlists, after you approve</li>
+        <li>Learn from your existing playlists and your corrections</li>
+      </ul>
+    </div>
+    <div class="col no">
+      <h3>Never / can't</h3>
+      <ul>
+        <li>Remove, move, unlike, or delete anything</li>
+        <li>Make anything public</li>
+        <li>See your password</li>
+        <li>Read <strong>Watch Later</strong>, <strong>Saved Shorts</strong> or watch history (YouTube blocks every outside app from these)</li>
+        <li>Change how the YouTube app itself looks or works</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="quota">
+    <h3>The daily YouTube allowance</h3>
+    <p class="small muted">Google gives each app 10,000 "units" a day for free. Reading is cheap, but each add costs 50, so a big first plan takes a few days. It continues by itself.</p>
+    <div class="qbar" role="img" aria-label="Example day: 300 units reading, 9,200 units for about 184 adds, 500 kept in reserve">
+      <div style="flex:300;background:var(--muted)"></div>
+      <div style="flex:9200;background:var(--ember)">≈184 adds × 50</div>
+      <div style="flex:500;background:var(--ink)"></div>
+    </div>
+    <div class="qkey"><span><i style="background:var(--muted)"></i>Reading (~300)</span><span><i style="background:var(--ember)"></i>Adding videos</span><span><i style="background:var(--ink)"></i>Safety reserve (500)</span></div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">If something's off</span>
+  <h2>Quick fixes</h2>
+  <details><summary>Google says "redirect_uri_mismatch"</summary><p>The address in your Google sign-in client must match the redirect URI shown on Noxara's sign-in page exactly, including https and /auth/callback.</p></details>
+  <details><summary>Sign-in stopped working after a week</summary><p>The Google consent screen is still in Testing. Set it to In production, then sign in again.</p></details>
+  <details><summary>The shortcut says "Invalid or missing token"</summary><p>Check the header is exactly <code>Authorization</code> with value <code>Bearer</code>, a space, then the token. If you made a new token, update the shortcut.</p></details>
+  <details><summary>It says the quota or AI allowance is used up</summary><p>Nothing's broken. It pauses and picks up again the next day on its own.</p></details>
+  <details><summary>I want out</summary><p>Settings → Disconnect YouTube. That revokes access and deletes the stored login. Playlists it made stay yours as normal playlists.</p></details>
+  <p class="small muted">Everything the app does is recorded on its <strong>Logs</strong> page.</p>
+</section>
+
+<footer>Noxara YouTube Intelligence · runs on free tiers (Cloudflare, Google, GitHub) · separate from your other projects</footer>
+</div>
+
+<script>
+(function () {
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('#checklist input'));
+  var KEY = 'noxara-guide-checks';
+  var saved = {};
+  try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { saved = {}; }
+  function render() {
+    var n = boxes.filter(function (b) { return b.checked; }).length;
+    document.getElementById('count').textContent = n + ' / ' + boxes.length;
+    document.getElementById('fill').style.width = (100 * n / boxes.length) + '%';
+  }
+  boxes.forEach(function (b) {
+    b.checked = !!saved[b.id];
+    b.addEventListener('change', function () {
+      saved[b.id] = b.checked;
+      try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+      render();
+    });
+  });
+  render();
+
+  document.querySelectorAll('button.copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var text = btn.getAttribute('data-copy');
+      var label = btn.textContent;
+      function done(msg) { btn.textContent = msg; setTimeout(function () { btn.textContent = label; }, 1500); }
+      function fallback() {
+        var span = btn.previousElementSibling;
+        var range = document.createRange(); range.selectNodeContents(span);
+        var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+        done('Selected');
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { done('Copied'); }, fallback);
+      } else { fallback(); }
+    });
+  });
+})();
+</script>
