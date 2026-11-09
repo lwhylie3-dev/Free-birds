@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Make It 3D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #07070a; --fg: rgba(255,255,255,.78); --dim: rgba(255,255,255,.45);
+    --line: rgba(255,255,255,.18); --accent: #7b6cff; --accent2: #5ad1ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--fg); font-family: Inter, system-ui, sans-serif; overflow-x: hidden; }
+  #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .vignette { position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,.75) 100%); }
+  #scroll { height: 900vh; }  /* scroll distance drives the camera flight */
+  .hud { position: fixed; z-index: 2; font-family: 'Space Mono', monospace; text-transform: uppercase;
+    letter-spacing: .14em; font-size: 11px; }
+  .nav { top: 20px; right: 20px; display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+    border: 1px solid var(--line); border-radius: 999px; background: rgba(10,10,14,.5); backdrop-filter: blur(8px); }
+  .nav a { color: var(--fg); text-decoration: none; }
+  .nav i { width: 28px; height: 1px; background: var(--line); display: block; }
+  .menu { left: 28px; bottom: 32px; max-width: 260px; }
+  .menu h2 { font-size: 11px; font-weight: 400; color: var(--dim); margin-bottom: 12px; }
+  .menu ul { list-style: none; display: grid; gap: 8px; }
+  .menu li { cursor: pointer; transition: color .2s, transform .2s; }
+  .menu li:hover, .menu li.on { color: #fff; transform: translateX(4px); }
+  .menu li::before { content: '→ '; color: var(--accent); }
+  .cta { margin-top: 18px; display: inline-block; padding: 10px 16px; border: 1px solid var(--line);
+    border-radius: 999px; color: var(--fg); text-decoration: none; }
+  .cta:hover { border-color: var(--accent); color: #fff; }
+  .caption { right: 28px; bottom: 32px; text-align: right; color: var(--dim); max-width: 280px; }
+  .caption b { display: block; color: #fff; font-size: 13px; margin-bottom: 4px; }
+  /* fallback / reduced-motion grid */
+  .grid { display: none; position: relative; z-index: 1; padding: 100px 16px 200px;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; max-width: 1100px; margin: 0 auto; }
+  .grid a { aspect-ratio: 4/3; border: 1px solid var(--line); border-radius: 14px; display: grid; place-items: center;
+    color: #fff; text-decoration: none; font-family: 'Space Mono', monospace; letter-spacing: .2em;
+    background: linear-gradient(135deg, rgba(123,108,255,.15), rgba(90,209,255,.05)); }
+  body.static #scene, body.static #scroll { display: none; }
+  body.static .grid { display: grid; }
+  @media (max-width: 768px) {
+    .menu { left: 16px; bottom: 20px; } .caption { display: none; } .nav { right: 16px; top: 16px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="scene" aria-hidden="true"></canvas>
+<div class="vignette"></div>
+<div id="scroll"></div>
+
+<nav class="hud nav"><a href="#work">Work</a><i></i><a href="#contact">Contact</a></nav>
+<div class="hud menu">
+  <h2>What are you looking for?</h2>
+  <ul id="menu"></ul>
+  <a class="cta" href="#contact">See all →</a>
+</div>
+<div class="hud caption" id="caption"><b></b><span></span></div>
+<section class="grid" id="grid"></section>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+/* ================= CONTENT — swap this for the user's data ================= */
+const BRAND = 'THE STUDIO';
+const ITEMS = [
+  { title: 'AURORA',   tag: 'Websites',      color: '#7b6cff', href: '#' },
+  { title: 'HALCYON',  tag: 'Installations', color: '#5ad1ff', href: '#' },
+  { title: 'V.O.I.D.', tag: 'AR / VR / AI',  color: '#ffb36b', href: '#' },
+  { title: 'NIMBUS',   tag: 'Multiplayer',   color: '#ff6b9a', href: '#' },
+  { title: 'KESTREL',  tag: 'Games',         color: '#6bffb8', href: '#' },
+];
+/* ========================================================================== */
+
+const menuEl = document.getElementById('menu');
+const gridEl = document.getElementById('grid');
+[...new Set(ITEMS.map(i => i.tag))].forEach(t => {
+  const li = document.createElement('li'); li.textContent = t; menuEl.appendChild(li);
+});
+ITEMS.forEach(i => {
+  const a = document.createElement('a'); a.href = i.href; a.textContent = i.title; gridEl.appendChild(a);
+});
+
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const mobile = matchMedia('(max-width: 768px)').matches;
+const canvas = document.getElementById('scene');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false }); }
+catch (e) { renderer = null; }
+if (!renderer || reduced) { document.body.classList.add('static'); }
+else document.fonts.ready.then(start);
+
+function start() {
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setClearColor(0x07070a);
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x07070a, 0.035);
+  const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 200);
+  const SPACING = 9;
+  const DEPTH = (ITEMS.length + 2) * SPACING;
+
+  /* ---------- soft round sprite for points ---------- */
+  const dot = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 64;
+    const g = c.getContext('2d'); const r = g.createRadialGradient(32,32,0,32,32,32);
+    r.addColorStop(0,'rgba(255,255,255,1)'); r.addColorStop(.3,'rgba(255,255,255,.6)'); r.addColorStop(1,'rgba(255,255,255,0)');
+    g.fillStyle = r; g.fillRect(0,0,64,64); return new THREE.CanvasTexture(c);
+  })();
+
+  /* ---------- 1. particle field ---------- */
+  const N = mobile ? 2500 : 6000;
+  const fPos = new Float32Array(N * 3), fCol = new Float32Array(N * 3);
+  const palette = [new THREE.Color('#ffffff'), new THREE.Color('#7b6cff'), new THREE.Color('#5ad1ff'), new THREE.Color('#ffb36b')];
+  for (let i = 0; i < N; i++) {
+    fPos[i*3] = (Math.random()-.5) * 40; fPos[i*3+1] = (Math.random()-.5) * 24;
+    fPos[i*3+2] = 10 - Math.random() * (DEPTH + 30);
+    const c = Math.random() < .9 ? palette[0] : palette[1 + (Math.random()*3|0)];
+    fCol.set([c.r, c.g, c.b], i*3);
+  }
+  const fieldGeo = new THREE.BufferGeometry();
+  fieldGeo.setAttribute('position', new THREE.BufferAttribute(fPos, 3));
+  fieldGeo.setAttribute('color', new THREE.BufferAttribute(fCol, 3));
+  const field = new THREE.Points(fieldGeo, new THREE.PointsMaterial({
+    size: .06, map: dot, vertexColors: true, transparent: true, opacity: .8,
+    depthWrite: false, blending: THREE.AdditiveBlending }));
+  scene.add(field);
+
+  /* ---------- 2. hero emblem: ring + lemniscate particle trail ---------- */
+  const hero = new THREE.Group(); hero.position.set(0, .8, 0); scene.add(hero);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1, .07, 32, 128),
+    new THREE.MeshStandardMaterial({ color: 0xdedcff, metalness: .9, roughness: .15, emissive: 0x2a2266 }));
+  hero.add(ring);
+  const ring2 = new THREE.Mesh(new THREE.TorusGeometry(.72, .02, 16, 96),
+    new THREE.MeshBasicMaterial({ color: 0x7b6cff, transparent: true, opacity: .7 }));
+  hero.add(ring2);
+  const TN = 1600, tPos = new Float32Array(TN * 3), tSeed = new Float32Array(TN);
+  for (let i = 0; i < TN; i++) tSeed[i] = Math.random();
+  const trailGeo = new THREE.BufferGeometry();
+  trailGeo.setAttribute('position', new THREE.BufferAttribute(tPos, 3));
+  const trail = new THREE.Points(trailGeo, new THREE.PointsMaterial({ size: .05, map: dot, color: 0xbfc8ff,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  hero.add(trail);
+  function updateTrail(t) {
+    for (let i = 0; i < TN; i++) {
+      const s = (tSeed[i] + t * .05) % 1, a = s * Math.PI * 2;
+      const d = 1 + Math.sin(a) ** 2, k = 1.4;           // lemniscate of Bernoulli, stood upright
+      const j = (Math.sin(i * 12.9898) * 43758.5453 % 1) * .08;
+      tPos[i*3]   = k * Math.sin(a) * Math.cos(a) / d + j;
+      tPos[i*3+1] = -k * Math.cos(a) / d - 1.5 + j;
+      tPos[i*3+2] = j * 2;
+    }
+    trailGeo.attributes.position.needsUpdate = true;
+  }
+
+  /* ---------- 3. glass cards + 4. particle dissolve ---------- */
+  function cardTexture(item) {
+    const c = document.createElement('canvas'); c.width = 1024; c.height = 640;
+    const g = c.getContext('2d');
+    const grd = g.createLinearGradient(0, 0, 1024, 640);
+    grd.addColorStop(0, item.color + '55'); grd.addColorStop(1, '#0b0b12cc');
+    g.fillStyle = grd; g.fillRect(0, 0, 1024, 640);
+    for (let i = 0; i < 400; i++) { g.fillStyle = `rgba(255,255,255,${Math.random()*.08})`;
+      g.fillRect(Math.random()*1024, Math.random()*640, 2, 2); }
+    g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 3; g.strokeRect(24, 24, 976, 592);
+    g.fillStyle = '#fff'; g.font = '700 92px "Space Mono", monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.shadowColor = item.color; g.shadowBlur = 30; g.fillText(item.title, 512, 330);
+    g.shadowBlur = 0; g.font = '400 26px "Space Mono", monospace'; g.fillStyle = 'rgba(255,255,255,.6)';
+    g.fillText(item.tag.toUpperCase(), 512, 430);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  }
+  const dissolveVS = `
+    uniform float uProgress; uniform float uTime; uniform float uRest; attribute vec3 aRand;
+    varying float vAlpha;
+    void main() {
+      vec3 p = position;
+      float d = smoothstep(aRand.x * .6, aRand.x * .6 + .4, uProgress);
+      p += (aRand - .5) * vec3(10., 8., 12.) * d;
+      p.y += sin(uTime + aRand.y * 6.28) * .05;
+      vAlpha = (uRest + (1. - uRest) * sin(d * 3.14159)) * (1. - d * d);
+      vec4 mv = modelViewMatrix * vec4(p, 1.);
+      gl_PointSize = min((2.5 + aRand.z * 2.) * (10. / -mv.z), 6.);
+      gl_Position = projectionMatrix * mv;
+    }`;
+  const dissolveFS = `
+    uniform vec3 uColor; varying float vAlpha;
+    void main() { float r = length(gl_PointCoord - .5); if (r > .5) discard;
+      gl_FragColor = vec4(uColor, vAlpha * (1. - r * 2.)); }`;
+
+  const cards = ITEMS.map((item, i) => {
+    const g = new THREE.Group();
+    const side = i % 2 ? 1 : -1;
+    g.position.set(side * (mobile ? .6 : 1.8), (Math.random() - .5) * 1.2, -(i + 1) * SPACING);
+    g.rotation.y = -side * .25;
+    const W = 4.2, H = 2.6;
+    const shape = new THREE.Shape(); const r = .2;
+    shape.moveTo(-W/2 + r, -H/2); shape.lineTo(W/2 - r, -H/2); shape.quadraticCurveTo(W/2, -H/2, W/2, -H/2 + r);
+    shape.lineTo(W/2, H/2 - r); shape.quadraticCurveTo(W/2, H/2, W/2 - r, H/2); shape.lineTo(-W/2 + r, H/2);
+    shape.quadraticCurveTo(-W/2, H/2, -W/2, H/2 - r); shape.lineTo(-W/2, -H/2 + r); shape.quadraticCurveTo(-W/2, -H/2, -W/2 + r, -H/2);
+    const geo = new THREE.ShapeGeometry(shape, 12);
+    const uv = geo.attributes.uv; for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) / W + .5, uv.getY(k) / H + .5);
+    const mat = new THREE.MeshBasicMaterial({ map: cardTexture(item), transparent: true, opacity: .92, side: THREE.DoubleSide });
+    const panel = new THREE.Mesh(geo, mat); g.add(panel);
+    const edge = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: item.color, transparent: true, opacity: .5 }));
+    g.add(edge);
+    // particles sampled across the card for the dissolve
+    const PN = mobile ? 1200 : 2600, pp = new Float32Array(PN * 3), pr = new Float32Array(PN * 3);
+    for (let k = 0; k < PN; k++) { pp.set([(Math.random() - .5) * W, (Math.random() - .5) * H, 0], k * 3);
+      pr.set([Math.random(), Math.random(), Math.random()], k * 3); }
+    const pg = new THREE.BufferGeometry();
+    pg.setAttribute('position', new THREE.BufferAttribute(pp, 3)); pg.setAttribute('aRand', new THREE.BufferAttribute(pr, 3));
+    const pmat = new THREE.ShaderMaterial({ vertexShader: dissolveVS, fragmentShader: dissolveFS, transparent: true,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+      uniforms: { uProgress: { value: 0 }, uTime: { value: 0 }, uRest: { value: .25 }, uColor: { value: new THREE.Color(item.color).lerp(new THREE.Color('#fff'), .5) } } });
+    const pts = new THREE.Points(pg, pmat); g.add(pts);
+    scene.add(g);
+    return { g, panel, edge, pmat, mat, item, hover: 0 };
+  });
+
+  /* ---------- 7. finale: brand text from particles + rays ---------- */
+  const finale = new THREE.Group(); finale.position.z = -DEPTH; scene.add(finale);
+  const textPts = (() => {
+    const c = document.createElement('canvas'); c.width = 600; c.height = 140;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.font = '700 96px "Space Mono", monospace';
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(BRAND, 300, 70);
+    const d = g.getImageData(0, 0, 600, 140).data, out = [];
+    for (let y = 0; y < 140; y += 2) for (let x = 0; x < 600; x += 2)
+      if (d[(y * 600 + x) * 4 + 3] > 128) out.push((x - 300) / 70, -(y - 70) / 70, 0);
+    return new Float32Array(out);
+  })();
+  const tCount = textPts.length / 3, fRand = new Float32Array(tCount * 3);
+  for (let k = 0; k < fRand.length; k++) fRand[k] = Math.random();
+  const fg = new THREE.BufferGeometry();
+  fg.setAttribute('position', new THREE.BufferAttribute(textPts, 3)); fg.setAttribute('aRand', new THREE.BufferAttribute(fRand, 3));
+  const finaleMat = new THREE.ShaderMaterial({ vertexShader: dissolveVS, fragmentShader: dissolveFS, transparent: true,
+    depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: { uProgress: { value: 1 }, uTime: { value: 0 }, uRest: { value: 1 }, uColor: { value: new THREE.Color('#e8e6ff') } } });
+  finale.add(new THREE.Points(fg, finaleMat));
+  const rayGeo = new THREE.BufferGeometry(), rays = [];
+  for (let k = 0; k < 90; k++) { const a = Math.random() * Math.PI * 2, r1 = 2 + Math.random(), r2 = r1 + 2 + Math.random() * 5;
+    rays.push(Math.cos(a) * r1, Math.sin(a) * r1 * .6, -1, Math.cos(a) * r2, Math.sin(a) * r2 * .6, -1.5); }
+  rayGeo.setAttribute('position', new THREE.Float32BufferAttribute(rays, 3));
+  const rayMat = new THREE.LineBasicMaterial({ color: 0x9a90ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending });
+  finale.add(new THREE.LineSegments(rayGeo, rayMat));
+
+  /* ---------- lights ---------- */
+  scene.add(new THREE.AmbientLight(0xffffff, .3));
+  const key = new THREE.PointLight(0x8f84ff, 30, 30); key.position.set(3, 3, 4); scene.add(key);
+  const rim = new THREE.PointLight(0x5ad1ff, 20, 30); rim.position.set(-3, -2, 2); scene.add(rim);
+
+  /* ---------- input: scroll + 6. mouse parallax + hover ---------- */
+  let scrollT = 0, smoothT = 0; const mouse = new THREE.Vector2(), look = new THREE.Vector2();
+  const onScroll = () => { scrollT = scrollY / (document.documentElement.scrollHeight - innerHeight || 1); };
+  addEventListener('scroll', onScroll, { passive: true }); onScroll();
+  addEventListener('pointermove', e => { mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight * 2 - 1)); });
+  const ray = new THREE.Raycaster(); let hovered = null;
+  addEventListener('click', () => { if (hovered && hovered.item.href) location.href = hovered.item.href; });
+  addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight); });
+
+  const capB = document.querySelector('#caption b'), capS = document.querySelector('#caption span');
+  const menuLis = [...menuEl.children];
+  let running = true; document.addEventListener('visibilitychange', () => { running = !document.hidden; if (running) loop(); });
+
+  const clock = new THREE.Clock();
+  function loop() {
+    if (!running) return;
+    requestAnimationFrame(loop);
+    const t = clock.getElapsedTime();
+    smoothT += (scrollT - smoothT) * .06;
+    look.lerp(mouse, .05);
+
+    const z = 6 - smoothT * (DEPTH + 2);
+    camera.position.set(look.x * .8, look.y * .5, z);
+    camera.lookAt(look.x * 1.5, look.y, z - 8);
+
+    field.rotation.z = t * .01;
+    hero.rotation.y = Math.sin(t * .4) * .4; ring.rotation.x = t * .3; ring2.rotation.y = -t * .6;
+    updateTrail(t);
+
+    ray.setFromCamera(mouse, camera);
+    const hit = ray.intersectObjects(cards.map(c => c.panel))[0];
+    hovered = hit ? cards.find(c => c.panel === hit.object) : null;
+    document.body.style.cursor = hovered ? 'pointer' : '';
+
+    let nearest = null, nd = Infinity;
+    cards.forEach(c => {
+      const dz = c.g.position.z - z;                        // >0 once the camera has passed it
+      const passed = THREE.MathUtils.smoothstep(dz, -2.5, 1.5);
+      c.hover += ((hovered === c ? 1 : 0) - c.hover) * .1;
+      const prog = Math.max(passed, c.hover * .25);
+      c.pmat.uniforms.uProgress.value = prog; c.pmat.uniforms.uTime.value = t;
+      c.mat.opacity = .92 * (1 - prog) * (1 - c.hover * .3); c.edge.material.opacity = .5 * (1 - prog);
+      c.g.position.y += Math.sin(t + c.g.position.z) * .002;
+      c.g.rotation.x = Math.sin(t * .5 + c.g.position.z) * .04;
+      const d = Math.abs(dz + 6); if (d < nd) { nd = d; nearest = c; }
+    });
+    if (nearest && nd < SPACING / 2) {
+      capB.textContent = nearest.item.title; capS.textContent = nearest.item.tag;
+      menuLis.forEach(li => li.classList.toggle('on', li.textContent === nearest.item.tag));
+    } else { capB.textContent = ''; capS.textContent = ''; menuLis.forEach(li => li.classList.remove('on')); }
+
+    const fin = THREE.MathUtils.smoothstep(smoothT, .82, .98);
+    finaleMat.uniforms.uProgress.value = 1 - fin; finaleMat.uniforms.uTime.value = t;
+    rayMat.opacity = fin * .35; finale.rotation.z = Math.sin(t * .2) * .03;
+
+    renderer.render(scene, camera);
+  }
+  loop();
+}
+</script>
+</body>
+</html>
