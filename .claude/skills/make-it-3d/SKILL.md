@@ -1,67 +1,100 @@
 ---
 name: make-it-3d
-description: Turn any page, app screen, landing page, portfolio or artifact into an immersive, cinematic 3D web experience — dark space, drifting particle fields, a glowing ring/emblem with a particle trail, floating glass cards that dissolve into particles, scroll-driven camera flight, mouse parallax and a particle-formed logo finale. TRIGGER whenever the user says "make it 3D", "I guess make it 3D", "3D it", "go 3D", "add the 3D stuff", "make it immersive", or asks for the "floating cards / particle" look — for Free-birds, the Eclipse models, or any other project. Apply it on top of whatever they asked to build; keep their content and purpose, upgrade the presentation.
+description: Add smooth, professionally designed 3D models to whatever is being built — silky high-poly forms, glass, chrome, pearl, clear-coat, iridescent blobs, rounded bevels, orbiting systems — lit like a studio product shot, the way award-winning (Awwwards / motion-design) sites do it. TRIGGER when the user says "make it 3D" or "add 3D" (also "3D it", "go 3D", "I guess make it 3D"), for Free-birds, Eclipse, or any other project. Works with whatever background/theme the project already has; it is about model QUALITY, not a dark particle look.
 ---
 
-# Make it 3D
+# Make it 3D / Add 3D
 
-The user's preset: when they say **"make it 3D"** (any phrasing), build whatever they asked for as an
-immersive Three.js experience in this style. Their content stays the star; the 3D is the stage.
+When the user says **"make it 3D"** or **"add 3D"**, build what they asked for and give it 3D models that
+look like a professional 3D/motion designer made them — smooth, softly lit, physically believable.
+Never angular, never default-grey, never "programmer 3D".
 
-## The look (non-negotiable ingredients)
+The user's complaint about mediocre 3D: *angular, faceted, flat, cheap*. Everything below exists to kill that.
 
-1. **Void background** — near-black (`#07070a`) with a soft radial vignette, faint fog for depth.
-2. **Particle field** — thousands of tiny additive-blended points drifting slowly; a few colored
-   sparks (violet `#7b6cff`, cyan `#5ad1ff`, warm amber `#ffb36b`).
-3. **Hero emblem** — a glowing torus/ring (or the project's logo extruded) that slowly rotates,
-   with a curved particle trail (a figure-eight / lemniscate tube of points) flowing beneath it.
-4. **Floating glass cards** — one per item (project, playlist, model, product). Rounded planes with
-   a frosted-glass look (`MeshPhysicalMaterial` transmission/roughness, or a translucent shader),
-   a thumbnail texture, and a big monospace title rendered in the card (e.g. `PROMETHEUS`).
-   Cards are scattered in depth along a path; the camera flies past them on scroll.
-5. **Particle dissolve** — when a card is passed (or hovered/clicked), it breaks into particles
-   that drift away, then reforms when scrolled back. Use a points mesh sampled from the card's
-   plane + a `uProgress` uniform for the scatter.
-6. **Mouse parallax** — camera/scene tilts gently toward the pointer (lerped, never jerky).
-7. **Finale** — the brand name forms out of particles (sample text pixels from a 2D canvas into
-   point positions) with radiating light rays.
-8. **HUD overlay (HTML, not WebGL)** — small monospace UI: a pill nav top-right
-   (`WORK —— CONTACT` style), a left-side menu ("WHAT ARE YOU LOOKING FOR?" → `→ item` list with
-   real categories from the user's content), a ghost-outline CTA button. Uppercase, letter-spaced,
-   low-contrast white (`rgba(255,255,255,.7)`).
+## Start from the reference
 
-Typography: a monospace/technical display face (Google Fonts: `Space Mono`, `JetBrains Mono` or
-`Major Mono Display`) for titles, `Inter` for body.
+`showroom.html` (this folder) is a working, verified example of the bar to hit: a singularity with glossy
+orbiters, a liquid iridescent blob, a refractive glass knot, a chrome/ceramic rounded-box stack — on a light
+studio backdrop with soft shadows. Copy its renderer/lighting/post setup verbatim, then design the models
+for the user's request. (`template.html` is an *optional* dark cinematic particle style — use it only when the
+user asks for that vibe.)
 
-## How to build it
+## The pro-3D checklist (all of these, every time)
 
-- Start from `template.html` in this folder — a working single-file reference with every
-  ingredient above. Copy it, then swap in the user's content (items → cards, categories → menu,
-  name → finale text, colors → their palette if they have one).
-- Three.js via import map, pinned: `https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js`
-  (addons from `.../three@0.160.0/examples/jsm/`). Never unpinned.
-- For a React/Vite/Next codebase (e.g. Free-birds' frontend or the Eclipse app), port the same scene
-  into a component (`@react-three/fiber` + `@react-three/drei` if already in deps, otherwise plain
-  three in a `useEffect` with cleanup) — keep the scene logic in one module, HUD as normal components.
-- Data drives the scene: build cards from an array (`[{title, image, tag, href}]`) so real content
-  (YouTube playlists, Eclipse models, projects) slots straight in.
+**Geometry — smooth by construction**
+- High tessellation: spheres ≥ 128×64, torus/knots ≥ 256 tubular segments, icosahedron detail ≥ 48 for
+  anything displaced. Scale down ~half on mobile, never below "no visible facets".
+- No sharp boxes: `RoundedBoxGeometry` (bevel radius ~10–15% of size, 8+ segments). Bevels catch light —
+  that is what reads as "designed".
+- Organic shapes: displace a high-res sphere in the vertex shader with low-frequency simplex noise
+  (1–2 octaves, low amplitude ~0.15–0.25) **and recompute normals in the shader** (neighbour-sample method in
+  `showroom.html → morphing()`). High-frequency noise = rock; low-frequency = liquid.
+- Need something custom? Build it from primitives with smooth unions: lathe (`LatheGeometry` with a
+  spline profile), `TubeGeometry` on a `CatmullRomCurve3`, `ExtrudeGeometry` with `bevelEnabled` +
+  `bevelSegments ≥ 8`, or SDF raymarching / marching cubes for melting/merging forms (metaballs).
+- Real assets beat procedural when available: GLTF/GLB via `GLTFLoader` (+ `DRACOLoader`), then apply
+  the materials below.
 
-## Quality bar
+**Materials — `MeshPhysicalMaterial`, never Basic/Lambert/Phong for hero objects**
+- Glass: `transmission: 1, thickness: .6–1.5, roughness: 0–.05, ior: 1.45–1.5`, tint with
+  `attenuationColor` + `attenuationDistance`; put something colorful behind/inside so refraction shows.
+- Chrome: `metalness: 1, roughness: .05–.15`. Brushed: roughness .3–.4.
+- Pearl / soap-bubble: `iridescence: 1, iridescenceIOR: 1.3–1.4, iridescenceThicknessRange: [100, 500]`.
+- Car-paint / lacquer / ceramic: base roughness .3–.6 + `clearcoat: 1, clearcoatRoughness: .05–.1`.
+- Fabric / velvet / satin: `sheen: 1, sheenColor`.
+- Glow: emissive colors with values > 1 (HDR) + bloom — glow only where it's motivated (energy, light).
+- Pick a deliberate 2–4 material palette per scene; mix one hero material with calmer supports.
 
-- 60fps target: cap `devicePixelRatio` at 2, particle counts ~4–8k desktop, halve on mobile
-  (`matchMedia('(max-width: 768px)')`), pause the loop when the tab is hidden.
-- `prefers-reduced-motion`: disable the scroll flight + dissolve, show cards as a static grid.
-- Resize handling, disposal of geometries/materials/textures on unmount.
-- No WebGL? Fall back to the HUD + a CSS grid of the cards. Content must always be reachable.
-- Phone width works: HUD collapses, cards stay tappable, no horizontal scroll.
-- Original work only — echo the *mood* (dark, particles, glass, cinematic), never copy a real
-  studio's site, names, logos or copy.
+**Lighting — image-based, like a photo studio**
+- Always set `scene.environment` (`RoomEnvironment` via `PMREMGenerator`, or an HDRI with `RGBELoader`).
+  Reflections from an environment map are the single biggest jump from amateur to pro.
+- One soft key `DirectionalLight` with shadows (`PCFSoftShadowMap`, 2048 map, radius 4–8) + the env.
+- Grounding: `ShadowMaterial` floor (opacity ~.1–.15) and/or a radial-gradient contact-shadow blob.
+  Floating objects without a shadow look pasted on.
 
-## Project notes
+**Renderer & post**
+- `ACESFilmicToneMapping` (exposure ~1), sRGB output, pixel ratio capped at 2.
+- `EffectComposer` on a `HalfFloatType` target with `samples: 4` (MSAA) → `RenderPass` →
+  `UnrealBloomPass` (strength ~.3–.5, threshold ≥ 1 so only HDR emissives bloom) → `OutputPass`.
+- Optional, tasteful: depth of field on product shots, a hair of film grain on dark scenes.
 
-- **Free-birds** (YouTube intelligence app): cards = playlists / sorted categories, card image =
-  video thumbnail, menu = AI categories, finale = "FREE BIRDS".
-- **Eclipse models**: cards = each model, emblem = an eclipse (dark sphere with a glowing corona
-  ring) instead of the plain torus.
-- Anything else: map the user's main list of things to cards; ask nothing extra unless there is
-  no content at all.
+**Camera & composition**
+- Long lens (FOV 25–35) = product-shot look; wide FOV distorts and cheapens.
+- Hero object fills ~40–60% of its frame, slight top-down angle, generous negative space.
+- Background matches the project (light studio gradient, brand color, or dark) — never pure #000/#fff flat.
+
+**Motion — slow, damped, physical**
+- Everything eases: `THREE.MathUtils.damp` (frame-rate independent) or springs; no linear snaps.
+- Idle life: slow rotation (.1–.3 rad/s), gentle float bob, noise morph — subtle.
+- Pointer: object/camera tilts toward the cursor a few degrees; hover = small scale/lift with damping.
+- Orbits: tilted ellipses, varied speeds/radii, different materials per orbiter (see Singularity).
+
+**Robustness**
+- Mobile: halve segments, keep MSAA, drop shadow map to 1024.
+- `prefers-reduced-motion`: freeze idle animation, keep the render.
+- No WebGL → static image/CSS fallback; content still reachable.
+- Dispose geometries/materials/textures/render targets on unmount in SPA frameworks.
+
+## Fitting it into a project
+
+- Plain HTML / artifact: import map with pinned `three@0.160.0` from `cdn.jsdelivr.net/npm/` (core + `examples/jsm/` addons).
+- React: `@react-three/fiber` + `@react-three/drei` (`<Environment preset="studio">`, `<ContactShadows>`,
+  `<MeshTransmissionMaterial>`, `<RoundedBox>`, `<Float>`) + `@react-three/postprocessing` if the stack
+  allows; otherwise plain three inside a `useEffect` with cleanup.
+- Data-driven: generate models from the project's real items (each playlist / model / product → an object
+  with its own material or color).
+- **Free-birds**: playlists/categories as a smooth orbiting system or a carousel of glossy forms, colored per category.
+- **Eclipse**: the orbiting-singularity idea, done right — clear-coat black core, HDR accretion disk with
+  bloom, high-poly orbiters in chrome/pearl/glass/satin on tilted ellipses (`showroom.html` specimen 1).
+  Don't edit Eclipse unless the user asks; this is the recipe for when they do.
+
+## Inspiration / research notes
+
+Award-listed 3D/WebGL sites worth studying for the look (Awwwards 3D & WebGL collections): Fragment
+(fragment.im), OSPLY (osply.co), Tinkeroll (layernative.com/tinkeroll), Ciuslabs (ciuslabs.com),
+Continuance (continuance.ai), Infinity Socks (theinfinitysocks.com), Anemone (anemone.mina-massoud.com),
+Dwell (dwell.au), Benno's Light (bennos-light.org). Three.js references: `webgl_materials_physical_transmission`,
+`webgl_materials_physical_clearcoat` (flakes normal map + clearcoat normal map for car paint),
+Three.js Journey "Wobbly Sphere", "Realistic render", "Environment map", "Modified materials".
+If the user shares an example site/video, extract: forms, materials, lighting, camera, motion — then match
+those with the checklist above. Echo the craft, never copy a studio's actual assets, names or branding.

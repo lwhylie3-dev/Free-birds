@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>3D Showroom</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root { --bg1: #f1eff5; --bg2: #d8d4e1; --fg: #1d1b22; --dim: #6d6878; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg1); color: var(--fg); font-family: Inter, system-ui, sans-serif; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .ui { position: fixed; left: 0; right: 0; bottom: 36px; display: flex; flex-direction: column; align-items: center; gap: 14px; z-index: 2; pointer-events: none; }
+  .ui h1 { font-size: 15px; font-weight: 600; letter-spacing: .02em; }
+  .ui p { font-size: 13px; color: var(--dim); max-width: 340px; text-align: center; padding: 0 16px; }
+  .dots { display: flex; gap: 8px; pointer-events: auto; }
+  .dots button { width: 34px; height: 4px; border: 0; border-radius: 4px; background: rgba(0,0,0,.15); cursor: pointer; transition: background .3s, width .3s; }
+  .dots button.on { background: var(--fg); width: 48px; }
+</style>
+</head>
+<body>
+<div class="ui"><h1 id="name"></h1><p id="desc"></p><div class="dots" id="dots"></div></div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const mobile = matchMedia('(max-width: 768px)').matches;
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- renderer: physically-correct, tone-mapped, soft shadows ---------- */
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = (() => {           // soft studio gradient backdrop (also what glass refracts)
+  const c = document.createElement('canvas'); c.width = 2; c.height = 512;
+  const g = c.getContext('2d'); const grd = g.createLinearGradient(0, 0, 0, 512);
+  grd.addColorStop(0, '#f4f2f8'); grd.addColorStop(.6, '#e4e0ec'); grd.addColorStop(1, '#cfcad9');
+  g.fillStyle = grd; g.fillRect(0, 0, 2, 512);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+
+/* image-based lighting = the #1 reason pro 3D looks "real" */
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, 0.1, 100);  // long lens = product-shot look
+camera.position.set(0, 0.6, 9);
+
+const key = new THREE.DirectionalLight(0xffffff, 1.6);
+key.position.set(3, 6, 4); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048); key.shadow.radius = 6; key.shadow.bias = -0.0005;
+Object.assign(key.shadow.camera, { left: -30, right: 30, top: 6, bottom: -6 });
+scene.add(key);
+
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 40), new THREE.ShadowMaterial({ opacity: .12 }));
+floor.rotation.x = -Math.PI / 2; floor.position.y = -1.6; floor.receiveShadow = true; scene.add(floor);
+
+/* soft contact shadow blob under each object (cheap, always smooth) */
+const contactTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d'); const r = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  r.addColorStop(0, 'rgba(20,10,40,.45)'); r.addColorStop(1, 'rgba(20,10,40,0)');
+  g.fillStyle = r; g.fillRect(0, 0, 128, 128); return new THREE.CanvasTexture(c);
+})();
+function contact(x, size) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ map: contactTex, transparent: true, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2; m.position.set(x, -1.59, 0); scene.add(m); return m;
+}
+
+/* ---------- shader chunk: smooth simplex-noise displacement WITH correct normals ---------- */
+const NOISE = `
+vec4 permute(vec4 x){return mod(((x*34.0)+1.0)*x,289.0);}
+vec4 taylorInvSqrt(vec4 r){return 1.79284291400159-0.85373472095314*r;}
+float snoise(vec3 v){const vec2 C=vec2(1.0/6.0,1.0/3.0);const vec4 D=vec4(0.0,0.5,1.0,2.0);
+vec3 i=floor(v+dot(v,C.yyy));vec3 x0=v-i+dot(i,C.xxx);vec3 g=step(x0.yzx,x0.xyz);vec3 l=1.0-g;
+vec3 i1=min(g.xyz,l.zxy);vec3 i2=max(g.xyz,l.zxy);vec3 x1=x0-i1+C.xxx;vec3 x2=x0-i2+2.0*C.xxx;vec3 x3=x0-1.0+3.0*C.xxx;
+i=mod(i,289.0);vec4 p=permute(permute(permute(i.z+vec4(0.0,i1.z,i2.z,1.0))+i.y+vec4(0.0,i1.y,i2.y,1.0))+i.x+vec4(0.0,i1.x,i2.x,1.0));
+float n_=1.0/7.0;vec3 ns=n_*D.wyz-D.xzx;vec4 j=p-49.0*floor(p*ns.z*ns.z);vec4 x_=floor(j*ns.z);vec4 y_=floor(j-7.0*x_);
+vec4 x=x_*ns.x+ns.yyyy;vec4 y=y_*ns.x+ns.yyyy;vec4 h=1.0-abs(x)-abs(y);vec4 b0=vec4(x.xy,y.xy);vec4 b1=vec4(x.zw,y.zw);
+vec4 s0=floor(b0)*2.0+1.0;vec4 s1=floor(b1)*2.0+1.0;vec4 sh=-step(h,vec4(0.0));vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy;vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;
+vec3 p0=vec3(a0.xy,h.x);vec3 p1=vec3(a0.zw,h.y);vec3 p2=vec3(a1.xy,h.z);vec3 p3=vec3(a1.zw,h.w);
+vec4 norm=taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));p0*=norm.x;p1*=norm.y;p2*=norm.z;p3*=norm.w;
+vec4 m=max(0.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0);m=m*m;
+return 42.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));}
+uniform float uTime; uniform float uAmp;
+float disp(vec3 p){ return (snoise(p*0.75+uTime*0.22)*0.85 + snoise(p*1.6-uTime*0.15)*0.15) * uAmp; }
+`;
+function morphing(material, amp = .28) {
+  const uniforms = { uTime: { value: 0 }, uAmp: { value: amp } };
+  material.onBeforeCompile = s => {
+    Object.assign(s.uniforms, uniforms);
+    s.vertexShader = NOISE + s.vertexShader
+      .replace('#include <beginnormal_vertex>', `
+        vec3 p0 = position; float d0 = disp(p0);
+        vec3 tA = normalize(abs(normal.y) > .99 ? cross(normal, vec3(1.,0.,0.)) : cross(normal, vec3(0.,1.,0.)));
+        vec3 tB = normalize(cross(normal, tA)); float e = .01;
+        vec3 P  = p0 + normal * d0;
+        vec3 PA = p0 + tA*e; PA += normal * disp(PA);
+        vec3 PB = p0 + tB*e; PB += normal * disp(PB);
+        vec3 objectNormal = normalize(cross(PA - P, PB - P));`)
+      .replace('#include <begin_vertex>', 'vec3 transformed = P;');
+  };
+  return uniforms;
+}
+
+/* ---------- specimens ---------- */
+const SEG = mobile ? 96 : 192;   // high tessellation = no facets, ever
+const GAP = 7;
+const specimens = [];
+function add(name, desc, obj, size, update) {
+  const x = specimens.length * GAP; obj.position.x = x; scene.add(obj);
+  obj.traverse(o => { if (o.isMesh && !o.userData.noShadow) o.castShadow = true; });
+  contact(x, size);
+  specimens.push({ name, desc, obj, x, update, hover: 0 });
+}
+
+// 1. Singularity with smooth orbiters — glossy spheres on tilted orbits around a black hole + glowing disk
+{
+  const g = new THREE.Group();
+  const hole = new THREE.Mesh(new THREE.SphereGeometry(.55, SEG, SEG / 2),
+    new THREE.MeshPhysicalMaterial({ color: 0x000000, roughness: .3, clearcoat: 1, clearcoatRoughness: .05, envMapIntensity: .12 }));
+  g.add(hole);
+  const diskMat = new THREE.ShaderMaterial({
+    transparent: true, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: { uTime: { value: 0 } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+    fragmentShader: `uniform float uTime; varying vec2 vUv;
+      void main(){ vec2 p = vUv - .5; float r = length(p) * 2.; float a = atan(p.y, p.x);
+        float band = smoothstep(.36, .42, r) * (1. - smoothstep(.55, 1., r));
+        float swirl = .65 + .35 * sin(a * 3. - uTime * 1.5 + r * 12.);
+        vec3 hot = mix(vec3(1.0, .55, .25), vec3(1.0, .92, .8), smoothstep(.75, .4, r));
+        gl_FragColor = vec4(hot * 2.6 * swirl, band * swirl); }` });
+  const disk = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 3.4), diskMat);
+  disk.rotation.x = -Math.PI / 2 + .35; disk.userData.noShadow = true; g.add(disk);
+  const photon = new THREE.Mesh(new THREE.TorusGeometry(.6, .012, 24, 256), new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 2.2, 1.6) }));
+  photon.userData.noShadow = true; g.add(photon);
+  const orbMats = [
+    new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 1, roughness: .08 }),                                   // chrome
+    new THREE.MeshPhysicalMaterial({ color: 0xf2e6ff, roughness: .2, iridescence: 1, iridescenceIOR: 1.4, clearcoat: 1 }), // pearl
+    new THREE.MeshPhysicalMaterial({ color: 0xffffff, transmission: 1, thickness: .6, roughness: .02, ior: 1.5 }),        // glass
+    new THREE.MeshPhysicalMaterial({ color: 0x6b5cff, roughness: .3, sheen: 1, sheenColor: 0xbfb6ff, clearcoat: .6 }),   // satin
+  ];
+  const orbiters = orbMats.map((m, i) => {
+    const s = new THREE.Mesh(new THREE.SphereGeometry(.13 + i * .03, SEG / 2, SEG / 4), m);
+    s.userData = { r: 1.35 + i * .38, speed: .55 - i * .09, tilt: (i - 1.5) * .28, phase: i * 1.7 };
+    g.add(s); return s;
+  });
+  add('Singularity', 'Glossy orbiters on tilted ellipses around a clear-coated core and a glowing accretion disk.', g, 4.5, (t, dt) => {
+    diskMat.uniforms.uTime.value = t;
+    orbiters.forEach(s => { const u = s.userData, a = t * u.speed + u.phase;
+      s.position.set(Math.cos(a) * u.r, Math.sin(a) * u.r * Math.sin(u.tilt) * .9, Math.sin(a) * u.r * .75); });
+    g.rotation.y += dt * .05;
+  });
+}
+
+// 2. Liquid iridescent blob — noise-displaced, 192-segment sphere with recomputed normals
+{
+  const mat = new THREE.MeshPhysicalMaterial({ color: 0xd9ccff, roughness: .12, metalness: .1,
+    iridescence: 1, iridescenceIOR: 1.3, iridescenceThicknessRange: [120, 480], clearcoat: 1, clearcoatRoughness: .05 });
+  const u = morphing(mat, .2);
+  const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(1.15, mobile ? 48 : 96), mat);
+  add('Liquid Blob', 'Organic noise-displaced form with iridescent clear-coat. Normals recomputed in the shader, so it stays silky.', blob, 3.6,
+    (t) => { u.uTime.value = t; blob.rotation.y = t * .15; });
+}
+
+// 3. Glass torus knot — real refraction (transmission + thickness + ior)
+{
+  const mat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, transmission: 1, thickness: 1.4, roughness: .04,
+    ior: 1.45, attenuationColor: new THREE.Color('#8fb7ff'), attenuationDistance: 2.2, clearcoat: 1, specularIntensity: 1 });
+  const knot = new THREE.Mesh(new THREE.TorusKnotGeometry(.75, .26, SEG * 2, SEG / 4), mat);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(.35, SEG / 2, SEG / 4), new THREE.MeshPhysicalMaterial({ color: 0xff7a59, roughness: .35, clearcoat: 1 }));
+  const g = new THREE.Group(); g.add(knot, core);
+  add('Glass Knot', 'Refractive glass with tinted absorption, wrapped around a coral core you can see through it.', g, 3.4,
+    (t) => { knot.rotation.set(t * .2, t * .3, 0); });
+}
+
+// 4. Chrome & ceramic soft-box stack — rounded bevels catch highlights
+{
+  const g = new THREE.Group();
+  const mats = [
+    new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 1, roughness: .1 }),
+    new THREE.MeshPhysicalMaterial({ color: 0xf6efe6, roughness: .45, clearcoat: .5 }),
+    new THREE.MeshPhysicalMaterial({ color: 0xffb36b, roughness: .25, clearcoat: 1 }),
+  ];
+  const boxes = mats.map((m, i) => {
+    const b = new THREE.Mesh(new RoundedBoxGeometry(1.1 - i * .2, .5, 1.1 - i * .2, 10, .14), m);
+    b.position.y = -1 + i * .62; g.add(b); return b;
+  });
+  add('Soft Stack', 'Rounded-bevel blocks in chrome, ceramic and lacquer. Bevels are what make edges read as "designed".', g, 3,
+    (t) => { boxes.forEach((b, i) => { b.rotation.y = Math.sin(t * .6 + i * .9) * .5; b.position.y = -1 + i * .62 + Math.sin(t * 1.2 + i) * .04; }); });
+}
+
+/* ---------- post: MSAA + gentle bloom on HDR-bright bits only + output (tone map / sRGB) ---------- */
+const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: 4 });
+const composer = new EffectComposer(renderer, rt);
+composer.setPixelRatio(Math.min(devicePixelRatio, 2));
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .35, .5, 1.6);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+/* ---------- interaction: damped camera, pointer tilt, drag/keys/wheel to browse ---------- */
+let index = 0, camX = 0;
+const mouse = new THREE.Vector2(), tilt = new THREE.Vector2();
+const dots = document.getElementById('dots');
+specimens.forEach((s, i) => { const b = document.createElement('button'); b.ariaLabel = s.name; b.onclick = () => go(i); dots.appendChild(b); });
+function go(i) {
+  index = (i + specimens.length) % specimens.length;
+  document.getElementById('name').textContent = specimens[index].name;
+  document.getElementById('desc').textContent = specimens[index].desc;
+  [...dots.children].forEach((b, k) => b.classList.toggle('on', k === index));
+}
+go(0);
+addEventListener('pointermove', e => mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight * 2 - 1)));
+addEventListener('keydown', e => { if (e.key === 'ArrowRight') go(index + 1); if (e.key === 'ArrowLeft') go(index - 1); });
+let wheelLock = 0;
+addEventListener('wheel', e => { const now = performance.now(); if (now - wheelLock < 700 || Math.abs(e.deltaY) < 10) return; wheelLock = now; go(index + Math.sign(e.deltaY)); }, { passive: true });
+let sx = null; addEventListener('pointerdown', e => sx = e.clientX);
+addEventListener('pointerup', e => { if (sx !== null && Math.abs(e.clientX - sx) > 50) go(index + (e.clientX < sx ? 1 : -1)); sx = null; });
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight); });
+
+const damp = (a, b, l, dt) => THREE.MathUtils.damp(a, b, l, dt);  // frame-rate independent easing
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), .05), t = reduced ? 0 : clock.elapsedTime;
+  camX = damp(camX, specimens[index].x, 4, dt);
+  tilt.x = damp(tilt.x, mouse.x, 3, dt); tilt.y = damp(tilt.y, mouse.y, 3, dt);
+  camera.position.set(camX + tilt.x * .6, .6 + tilt.y * .35, mobile ? 11 : 9);
+  camera.lookAt(camX, 0, 0);
+  key.position.x = camX + 3; key.target.position.x = camX; key.target.updateMatrixWorld();
+  specimens.forEach(s => {
+    if (!reduced) s.update(t, dt);
+    const focus = s === specimens[index] ? 1 : 0;
+    s.obj.position.y = damp(s.obj.position.y, focus ? .05 : -.15, 3, dt);
+    const sc = damp(s.obj.scale.x, focus ? 1 : .82, 3, dt); s.obj.scale.setScalar(sc);
+    s.obj.rotation.x = damp(s.obj.rotation.x, tilt.y * -.15 * focus, 3, dt);
+  });
+  composer.render();
+});
+</script>
+</body>
+</html>
