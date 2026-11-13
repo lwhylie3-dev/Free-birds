@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Eclipse Desk</title>
+<style>
+  /* On a transparent OLED, black pixels are clear glass. Everything else glows. */
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none;
+    font: 600 22px/1.3 -apple-system, system-ui, sans-serif; color: #e8fff0; }
+  #desk { position: absolute; inset: 0; }
+  #cat { position: absolute; width: 120px; height: 90px; transform: translate(-50%, -50%); transition: left .12s linear, top .12s linear; }
+  #ring { position: absolute; width: 160px; height: 160px; border-radius: 50%; transform: translate(-50%, -50%);
+    border: 3px solid rgba(124, 242, 154, .0); transition: border-color .4s; }
+  .charging #ring { border-color: rgba(124, 242, 154, .8); animation: pulse 2s ease-in-out infinite; }
+  .seeking #ring { border-color: rgba(255, 210, 90, .8); }
+  @keyframes pulse { 50% { transform: translate(-50%, -50%) scale(1.12); opacity: .5; } }
+  #hud { position: absolute; top: 24px; left: 32px; right: 32px; display: grid; gap: 10px; }
+  .item { padding: 10px 14px; border: 1px solid rgba(124, 242, 154, .5); border-radius: 12px; max-width: 46ch; }
+  .item.urgent { border-color: #ff6b5e; color: #ffd7d2; }
+  #nudge { position: absolute; inset: 0; display: none; place-items: center; font-size: 64px; color: #7cf29a; letter-spacing: .04em; }
+  .nudge #nudge { display: grid; animation: blink 1.4s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  /* Focus mode: the glass goes almost fully clear, only the cat remains, dimmed. */
+  .focus #hud, .focus #status { opacity: 0; }
+  .focus #cat { opacity: .35; }
+  #status { position: absolute; bottom: 18px; right: 28px; font-size: 16px; color: #7cf29a; opacity: .8; }
+  #text { position: absolute; bottom: 18px; left: 32px; font-size: 26px; }
+</style>
+</head>
+<body>
+<div id="desk">
+  <div id="hud"></div>
+  <div id="ring"></div>
+  <svg id="cat" viewBox="0 0 120 90" aria-hidden="true">
+    <g fill="none" stroke="#7cf29a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M22 70 Q20 40 40 34 L44 14 L56 30 Q62 28 68 30 L80 14 L84 34 Q102 40 98 70 Z"/>
+      <path d="M98 66 Q116 60 112 40"/>
+      <circle id="eyeL" cx="48" cy="50" r="3" fill="#7cf29a"/>
+      <circle id="eyeR" cx="72" cy="50" r="3" fill="#7cf29a"/>
+      <path d="M56 60 Q60 64 64 60"/>
+    </g>
+  </svg>
+  <div id="text"></div>
+  <div id="status"></div>
+  <div id="nudge">STAND UP · STRETCH · WATER</div>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  let blink = 0;
+  async function tick() {
+    try {
+      const s = await (await fetch("/state.json", { cache: "no-store" })).json();
+      const x = (s.coil[0] / s.desk.w) * innerWidth, y = (s.coil[1] / s.desk.h) * innerHeight;
+      // The cat rides just above the coil so it never sits under the phone.
+      Object.assign($("cat").style, { left: `${x}px`, top: `${y - 110}px` });
+      Object.assign($("ring").style, { left: `${x}px`, top: `${y}px` });
+      document.body.className = [s.charge, s.focus ? "focus" : "", s.nudge ? "nudge" : ""].join(" ");
+      $("hud").innerHTML = s.hud.map((h) => `<div class="item ${h.priority >= 2 ? "urgent" : ""}">${esc(h.text)}</div>`).join("");
+      $("text").textContent = s.text || "";
+      $("status").textContent = `${s.charge}${s.focus ? " · focus" : ""}`;
+      blink = (blink + 1) % 30;
+      for (const e of ["eyeL", "eyeR"]) $(e).setAttribute("r", blink === 0 ? "0.6" : "3");
+    } catch { /* agent restarting */ }
+  }
+  setInterval(tick, 150);
+  tick();
+</script>
+</body>
+</html>

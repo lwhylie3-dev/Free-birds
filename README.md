@@ -4,6 +4,7 @@ A private, standalone app that reads your YouTube likes and playlists, finds you
 
 - **Setup (iPhone/Safari):** [docs/SETUP.md](docs/SETUP.md)
 - **Architecture and API limits:** [docs/PROPOSAL.md](docs/PROPOSAL.md)
+- **Eclipse (desk, Even G2 glasses, R1 ring, wearables):** [docs/ECLIPSE.md](docs/ECLIPSE.md)
 
 ## What v0.1 does
 
@@ -23,6 +24,10 @@ Phase 2 (organizing):
 - Writes only **add**. Nothing is ever removed, moved, unliked, or deleted.
 - Target playlists are re-read right before applying, so nothing gets added twice. Writes are paced by the daily quota (about 190 a day) and continue automatically.
 - Playlist-management access is requested only when you tap **Enable organizing**.
+
+## Eclipse
+
+A registry, event log, command queue and heads-up feed for external systems, served at `/eclipse/v1` with a token per device. It ships with a smart-desk agent (`eclipse/desk`) and an Even G2 lens app driven by the R1 ring (`eclipse/g2`). See [docs/ECLIPSE.md](docs/ECLIPSE.md).
 
 ## Stack
 

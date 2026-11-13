@@ -114,3 +114,41 @@ describe("misc", () => {
     expect(quotaDay(new Date("2026-01-01T05:00:00Z"))).toBe("2025-12-31");
   });
 });
+
+describe("eclipse", async () => {
+  const { composeGlance, isDeviceId, mergeState, seatedMinutes } = await import("../src/eclipse");
+
+  it("validates device ids", () => {
+    expect(isDeviceId("desk")).toBe(true);
+    expect(isDeviceId("g2-left")).toBe(true);
+    expect(isDeviceId("Desk")).toBe(false);
+    expect(isDeviceId("-x")).toBe(false);
+    expect(isDeviceId("a".repeat(33))).toBe(false);
+  });
+
+  it("merges state and deletes nulls", () => {
+    expect(mergeState({ a: 1, b: 2 }, { b: null, c: 3 })).toEqual({ a: 1, c: 3 });
+  });
+
+  it("counts seated minutes", () => {
+    expect(seatedMinutes({}, 1000)).toBeNull();
+    expect(seatedMinutes({ seated_since: 0 }, 61 * 60_000)).toBe(61);
+  });
+
+  it("composes a glance for the lenses", () => {
+    const g = composeGlance({
+      time: "9:41 PM",
+      desk: { seated_since: Date.now() - 12 * 60_000, charge: "charging", focus: true },
+      items: [
+        { id: 1, text: "Stand up", priority: 2, created_at: 0 },
+        { id: 2, text: "Call back", priority: 1, created_at: 0 },
+      ],
+      index: 1,
+      review: 3,
+    });
+    expect(g.split("\n")[0]).toBe("9:41 PM  |  seated 12m  |  phone charging  |  FOCUS  |  3 to review");
+    expect(g).toContain("Call back");
+    expect(g).toContain("2/2");
+    expect(composeGlance({ time: "1", items: [], index: 0, review: 0 })).toContain("All clear.");
+  });
+});

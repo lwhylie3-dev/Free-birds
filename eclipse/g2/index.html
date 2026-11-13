@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Eclipse</title>
+  <style>
+    :root { --bg:#0b0d10; --card:#14181d; --text:#e8eaed; --muted:#8b93a0; --accent:#7cf29a; --line:#232a33; }
+    * { box-sizing: border-box; }
+    body { margin:0; padding:16px; background:var(--bg); color:var(--text); font:15px/1.45 -apple-system, system-ui, sans-serif; }
+    h1 { font-size:1.3rem; margin:0 0 4px; } p { margin:4px 0 12px; }
+    .muted { color:var(--muted); font-size:.85rem; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:12px; }
+    label { display:block; margin:8px 0 4px; font-weight:600; }
+    input { width:100%; padding:10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); font:inherit; }
+    button { margin-top:12px; padding:10px 14px; border:0; border-radius:8px; background:var(--accent); color:#000; font-weight:700; font:inherit; }
+    pre { white-space:pre-wrap; font:12px/1.4 ui-monospace, Menlo, monospace; color:var(--accent); background:#000; padding:10px; border-radius:8px; min-height:7em; }
+    #log { font:12px/1.4 ui-monospace, Menlo, monospace; color:var(--muted); max-height:12em; overflow:auto; }
+  </style>
+</head>
+<body>
+  <h1>Eclipse</h1>
+  <p class="muted">Heads-up feed on your G2 lenses. Ring and touchpad gestures control your desk.</p>
+  <form id="cfg" class="card">
+    <label for="url">Eclipse server</label>
+    <input id="url" type="url" placeholder="https://noxara-yt.you.workers.dev" required>
+    <label for="token">Glasses token</label>
+    <input id="token" type="password" placeholder="From the Eclipse page → g2 → Issue token" required>
+    <button>Save and connect</button>
+  </form>
+  <div class="card"><div class="muted">On the lenses now</div><pre id="mirror">…</pre></div>
+  <div class="card"><div class="muted">Gestures</div>
+    <p class="muted">Glasses: swipe = next/prev · tap = done · double tap = exit<br>
+    Ring: tap = next · double tap = desk focus · swipe up = stand nudge · long press = desk finds &amp; charges your phone</p>
+    <div id="log"></div></div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

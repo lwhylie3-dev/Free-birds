@@ -6,6 +6,7 @@ import { now, type Env } from "./env";
 import { approvePlan, buildPlan, cancelPlan, MAX_PLAN_ITEMS, openPlan, seedFromPlaylists, WRITE_UNITS, type Plan } from "./organize";
 import { startSync } from "./sync";
 import { runStep, scheduled } from "./work";
+import { DEVICE_KINDS, eclipseApi, EclipseBadRequest, eclipseTick, getDeviceState, openHud, postHud, queueCommand, COMMANDS, registerDevice, revokeDevice, rotateDeviceToken, type Device } from "./eclipse";
 import { submitVideo } from "./submit";
 import { CSS, esc, flash, JS, layout } from "./ui";
 import { canWrite, DAILY_QUOTA, isConnected, QUOTA_RESERVE, QuotaExhausted, ReauthRequired } from "./youtube";
@@ -45,6 +46,9 @@ app.post("/share", async (c) => {
   }
 });
 
+// Eclipse device API: per-device bearer tokens, CORS for the G2 WebView. Registered before the session guard.
+app.route("/eclipse/v1", eclipseApi);
+
 app.get("/auth/login", (c) => beginOAuth(c));
 // Guarded below: asks Google for playlist-management access on top of read-only.
 app.get("/auth/upgrade", (c) => beginOAuth(c, true));
@@ -68,7 +72,7 @@ async function guard(c: C, next: Next) {
   return next();
 }
 app.use("/", guard);
-for (const p of ["/videos/*", "/videos", "/categories/*", "/categories", "/add", "/logs", "/settings/*", "/settings", "/sync", "/api/*", "/auth/logout", "/auth/disconnect", "/auth/upgrade", "/organize", "/organize/*"]) {
+for (const p of ["/videos/*", "/videos", "/categories/*", "/categories", "/add", "/logs", "/settings/*", "/settings", "/sync", "/api/*", "/auth/logout", "/auth/disconnect", "/auth/upgrade", "/organize", "/organize/*", "/eclipse", "/eclipse/devices", "/eclipse/devices/*", "/eclipse/hud", "/eclipse/hud/*", "/eclipse/command"]) {
   app.use(p, guard);
 }
 
@@ -642,6 +646,136 @@ app.post("/settings/shortcut", async (c) => {
   return c.html(settingsPage(c, new URL(c.req.url).origin, await canWrite(c.env), token));
 });
 
+// ---------- Eclipse: external systems ----------
+
+function ago(ts: number | null): string {
+  if (!ts) return "never";
+  const m = Math.floor((Date.now() - ts) / 60000);
+  return m < 1 ? "just now" : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.floor(m / 60)}h ago` : `${Math.floor(m / 1440)}d ago`;
+}
+
+async function eclipsePage(c: C, opts: { token?: { id: string; value: string }; msg?: string; err?: string } = {}): Promise<string> {
+  const origin = new URL(c.req.url).origin;
+  const { results: devices } = await c.env.DB.prepare("SELECT * FROM devices ORDER BY status, kind, id").all<Device & { token_hash: string | null }>();
+  const states = await Promise.all(devices.map((d) => getDeviceState(c.env, d.id)));
+  const hud = await openHud(c.env, "all");
+  const { results: events } = await c.env.DB.prepare("SELECT device_id, type, payload, ts FROM device_events ORDER BY id DESC LIMIT 25").all<{
+    device_id: string;
+    type: string;
+    payload: string;
+    ts: number;
+  }>();
+  const active = devices.filter((d) => d.status === "active");
+  const cards = devices
+    .map((d, i) => {
+      const st = Object.entries(states[i] ?? {})
+        .map(([k, v]) => `${esc(k)}=<b>${esc(typeof v === "object" ? JSON.stringify(v) : v)}</b>`)
+        .join(" · ");
+      return `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(d.name)}</b>
+        <span class="pill">${esc(d.kind)}</span></div>
+        <div class="muted small"><code>${esc(d.id)}</code>${d.vendor || d.model ? ` · ${esc(`${d.vendor} ${d.model}`.trim())}` : ""}${d.parent_id ? ` · via <code>${esc(d.parent_id)}</code>` : ""} · seen ${esc(ago(d.last_seen_at))}${d.status === "revoked" ? ` · <span class="s-error">revoked</span>` : ""}</div>
+        ${st ? `<p class="small">${st}</p>` : ""}
+        ${opts.token?.id === d.id ? `<p><b>Token for ${esc(d.id)} (shown only once):</b></p><p class="token">${esc(opts.token.value)}</p>` : ""}
+        <div class="row">${d.parent_id && !d.token_hash && d.status === "active" ? "" : `<form method="post" action="/eclipse/devices/${esc(d.id)}/token"><button class="secondary">${d.token_hash ? "New token" : "Issue token"}</button></form>`}
+        ${d.status === "active" ? `<form method="post" action="/eclipse/devices/${esc(d.id)}/revoke"><button class="danger">Revoke</button></form>` : ""}</div></div>`;
+    })
+    .join("");
+  const kindOptions = DEVICE_KINDS.map((k) => `<option>${k}</option>`).join("");
+  const parentOptions = active.map((d) => `<option value="${esc(d.id)}">${esc(d.id)}</option>`).join("");
+  const cmdOptions = COMMANDS.map((k) => `<option>${k}</option>`).join("");
+  const targetOptions = active.filter((d) => d.token_hash).map((d) => `<option value="${esc(d.id)}">${esc(d.id)}</option>`).join("");
+  return layout(
+    "Eclipse",
+    `${flash(opts.msg)}${flash(opts.err, "error")}
+    <p class="muted small">Every external system in one place: the desk, Even G2 glasses, the R1 ring, and other wearables. Devices call <code>${esc(origin)}/eclipse/v1</code> with their own token. Setup: <code>docs/ECLIPSE.md</code>.</p>
+    <h2>Heads-up (${hud.length})</h2>
+    <div class="card">
+      ${hud.map((h) => `<div class="log row" style="justify-content:space-between"><span>${h.priority >= 2 ? "‼️ " : ""}${esc(h.text)}</span><form method="post" action="/eclipse/hud/${h.id}/ack"><button class="secondary">Done</button></form></div>`).join("") || `<p class="muted small">Nothing on the lenses.</p>`}
+      <form method="post" action="/eclipse/hud"><label for="hud-text">Send to the lenses and desk</label>
+        <input type="text" id="hud-text" name="text" maxlength="300" required>
+        <div class="row" style="margin-top:8px"><select name="target" style="width:auto"><option>all</option><option>glasses</option><option>desk</option></select>
+        <select name="priority" style="width:auto"><option value="1">normal</option><option value="2">urgent</option><option value="0">low</option></select><button>Send</button></div></form>
+    </div>
+    <h2>Devices (${active.length})</h2>
+    ${cards || `<div class="card muted small">No devices yet. Start with the desk, the G2 glasses, and the ring (with the glasses as its parent).</div>`}
+    <details class="card"><summary><b>Register a device</b></summary>
+      <form method="post" action="/eclipse/devices">
+        <label for="d-id">ID</label><input type="text" id="d-id" name="id" placeholder="desk, g2, r1, watch…" pattern="[a-z0-9][a-z0-9-]{0,31}" required>
+        <label for="d-name">Name</label><input type="text" id="d-name" name="name" placeholder="Eclipse Desk">
+        <label for="d-kind">Kind</label><select id="d-kind" name="kind">${kindOptions}</select>
+        <label for="d-vendor">Vendor / model</label><div class="row"><input type="text" id="d-vendor" name="vendor" placeholder="Even Realities" style="flex:1"><input type="text" name="model" placeholder="G2" style="flex:1" aria-label="Model"></div>
+        <label for="d-parent">Reports through (for the ring)</label><select id="d-parent" name="parent"><option value="">none (gets its own token)</option>${parentOptions}</select>
+        <p style="margin-top:12px"><button>Register</button></p>
+      </form></details>
+    ${targetOptions ? `<details class="card"><summary><b>Send a command</b></summary>
+      <form method="post" action="/eclipse/command"><div class="row"><select name="device" style="width:auto">${targetOptions}</select><select name="command" style="width:auto">${cmdOptions}</select><button>Queue</button></div>
+      <label for="c-text">Text (for oled.show)</label><input type="text" id="c-text" name="text" maxlength="200"></form></details>` : ""}
+    <h2>Recent events</h2>
+    <div class="card">${events.map((e) => `<div class="log"><b>${esc(e.device_id)}</b> ${esc(e.type)} <span class="muted">${esc(ago(e.ts))}</span><br><code>${esc(e.payload.slice(0, 160))}</code></div>`).join("") || `<p class="muted small">No events yet.</p>`}</div>`,
+  );
+}
+
+async function eclipseAction(c: C, fn: () => Promise<{ token?: { id: string; value: string }; msg?: string } | void>) {
+  try {
+    const r = (await fn()) ?? {};
+    if (r.token) c.header("cache-control", "no-store");
+    return c.html(await eclipsePage(c, r));
+  } catch (err) {
+    const message = err instanceof EclipseBadRequest ? err.message : String(err).includes("UNIQUE") ? "That device ID is already taken." : friendly(err);
+    return c.html(await eclipsePage(c, { err: message }), 400);
+  }
+}
+
+app.get("/eclipse", async (c) => c.html(await eclipsePage(c)));
+app.post("/eclipse/devices", (c) =>
+  eclipseAction(c, async () => {
+    const f = await c.req.parseBody();
+    const id = String(f.id ?? "").trim().toLowerCase();
+    const parent = String(f.parent ?? "");
+    const token = await registerDevice(c.env, {
+      id,
+      kind: String(f.kind ?? ""),
+      name: String(f.name ?? "").trim(),
+      vendor: String(f.vendor ?? "").trim(),
+      model: String(f.model ?? "").trim(),
+      parentId: parent || null,
+      withToken: !parent,
+    });
+    return token ? { token: { id, value: token } } : { msg: `Registered ${id}. It reports through ${parent}.` };
+  }),
+);
+app.post("/eclipse/devices/:id/token", (c) => eclipseAction(c, async () => ({ token: { id: c.req.param("id"), value: await rotateDeviceToken(c.env, c.req.param("id")) } })));
+app.post("/eclipse/devices/:id/revoke", (c) =>
+  eclipseAction(c, async () => {
+    await revokeDevice(c.env, c.req.param("id"));
+    return { msg: `Revoked ${c.req.param("id")}.` };
+  }),
+);
+app.post("/eclipse/hud", (c) =>
+  eclipseAction(c, async () => {
+    const f = await c.req.parseBody();
+    const text = String(f.text ?? "").trim();
+    if (!text) return { msg: "Nothing to send." };
+    const target = ["all", "glasses", "desk"].includes(String(f.target)) ? (String(f.target) as "all" | "glasses" | "desk") : "all";
+    await postHud(c.env, text, { target, priority: Math.min(2, Math.max(0, Number(f.priority) || 0)) });
+    return { msg: "Sent." };
+  }),
+);
+app.post("/eclipse/hud/:id/ack", (c) =>
+  eclipseAction(c, async () => {
+    await c.env.DB.prepare("UPDATE hud_messages SET acked_at = ? WHERE id = ?").bind(Date.now(), Number(c.req.param("id"))).run();
+  }),
+);
+app.post("/eclipse/command", (c) =>
+  eclipseAction(c, async () => {
+    const f = await c.req.parseBody();
+    const command = String(f.command ?? "");
+    const text = String(f.text ?? "").trim();
+    await queueCommand(c.env, String(f.device ?? ""), command, text ? { text } : {});
+    return { msg: `Queued ${command}.` };
+  }),
+);
+
 app.post("/auth/logout", (c) => {
   logout(c);
   return c.redirect("/");
@@ -665,5 +799,6 @@ export default {
   fetch: app.fetch,
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(scheduled(env));
+    ctx.waitUntil(eclipseTick(env).catch((err) => log(env, "eclipse", "error", `Tick failed: ${String(err)}`)));
   },
 } satisfies ExportedHandler<Env>;
