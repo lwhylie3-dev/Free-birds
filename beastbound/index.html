@@ -1,0 +1,167 @@
+<meta charset="utf-8">
+<title>Beastbound Wilds</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral+SC:wght@600;700&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap">
+<style>
+/* Layout: full-bleed WebGL world; HUD pinned to the four corners; panels float centered */
+:root{
+  --ink:#ece9e2; --dim:#a8a59c; --glass:rgba(16,18,20,.62); --glass2:rgba(16,18,20,.82); --line:rgba(236,233,226,.16);
+  --gold:#e3bd62; --hp:#d9574a; --breath:#7fd0e6; --cool:rgba(0,0,0,.6);
+  --display:"Spectral SC",Georgia,serif; --ui:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%;margin:0;overflow:hidden;background:#9aa8ab;color:var(--ink);font:14px/1.4 var(--ui);-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+#stage canvas{display:block;touch-action:none;position:fixed;inset:0}
+[hidden]{display:none!important}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.panel{background:var(--glass);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:6px}
+.hud{position:fixed;z-index:5;opacity:0;transition:opacity .6s;pointer-events:none}
+body.playing .hud{opacity:1}
+.hud button{pointer-events:auto}
+
+/* hero card */
+#card{top:calc(12px + env(safe-area-inset-top,0px));left:max(12px,env(safe-area-inset-left,0px));padding:10px 12px;min-width:220px;max-width:min(300px,52vw)}
+#card .row{display:flex;gap:10px;align-items:center}
+#swatch{width:10px;height:34px;border-radius:2px;flex:none;box-shadow:0 0 10px currentColor}
+#heroName{font:700 20px/1 var(--display);letter-spacing:.04em;margin:0}
+#heroRole{color:var(--dim);font-size:11px;letter-spacing:.1em;text-transform:uppercase;margin-top:3px}
+#heroBeast{font-size:12px;margin-top:6px;color:var(--ink)}
+.bar{height:7px;background:rgba(255,255,255,.1);border-radius:4px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;width:100%;transition:width .12s linear}
+#hpFill{background:var(--hp)} #brFill{background:var(--breath)}
+.barl{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.12em;color:var(--dim);margin-top:6px;text-transform:uppercase}
+
+/* top right */
+#top{top:calc(12px + env(safe-area-inset-top,0px));right:max(12px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+#obj{padding:8px 12px;font-size:13px} #obj b{color:var(--gold);font-weight:600}
+.tbtns{display:flex;gap:6px}
+.tbtn{padding:7px 11px;border-radius:5px;background:var(--glass);border:1px solid var(--line);font-size:12px;letter-spacing:.06em}
+.tbtn kbd,.ab kbd{font:500 10px var(--ui);opacity:.65;margin-left:4px}
+.tbtn.on{border-color:var(--gold);color:var(--gold)}
+
+/* action cluster */
+#acts{right:max(14px,env(safe-area-inset-right,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:repeat(4,auto);gap:8px;align-items:end;justify-items:center}
+.ab{--cd:0deg;position:relative;width:62px;height:62px;border-radius:50%;background:var(--glass2);border:1px solid var(--line);display:grid;place-items:center;padding:0;overflow:hidden;touch-action:none}
+.ab .nm{font-size:9.5px;line-height:1.1;text-align:center;padding:0 6px;letter-spacing:.02em}
+.ab kbd{position:absolute;top:5px;left:50%;transform:translateX(-50%);margin:0}
+.ab .t{position:absolute;inset:0;display:grid;place-items:center;font:700 18px var(--ui);pointer-events:none}
+.ab.cool::after{content:"";position:absolute;inset:0;background:conic-gradient(var(--cool) var(--cd),transparent 0);pointer-events:none}
+.ab.cool .nm{opacity:.45}
+.ab.poor{border-color:rgba(127,208,230,.15)} .ab.poor .nm{color:#7f8c90}
+.ab.on{border-color:var(--gold);box-shadow:0 0 14px rgba(227,189,98,.5)}
+.ab.big{width:84px;height:84px;grid-column:4;grid-row:2/4;align-self:center;background:rgba(40,30,20,.75);border-color:rgba(227,189,98,.4)}
+.ab.big .nm{font:700 13px var(--display);letter-spacing:.08em}
+.ab.sm{width:50px;height:50px}
+.touchonly{display:none} body.touch .touchonly{display:grid}
+body.touch .ab kbd,body.touch .tbtn kbd,body.touch .deskonly{display:none}
+
+#help{left:max(14px,env(safe-area-inset-left,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));padding:9px 12px;font-size:11.5px;color:var(--dim);max-width:340px}
+#help kbd{font:500 11px var(--ui);color:var(--ink);border:1px solid var(--line);border-radius:3px;padding:0 4px}
+
+#toast{position:fixed;left:50%;top:calc(24vh + env(safe-area-inset-top,0px));transform:translate(-50%,-8px);padding:9px 16px;font:600 15px var(--display);letter-spacing:.05em;opacity:0;transition:opacity .25s,transform .25s;z-index:8;pointer-events:none;text-align:center;max-width:min(560px,86vw)}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+#hurt{position:fixed;inset:0;pointer-events:none;box-shadow:inset 0 0 140px rgba(200,40,30,.9);opacity:0;transition:opacity .2s;z-index:4}
+.tint{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity .4s;z-index:3}
+.tint.pride{background:radial-gradient(circle,transparent 45%,rgba(120,200,255,.28));mix-blend-mode:screen}
+
+#joy{position:fixed;width:120px;height:120px;border-radius:50%;border:1px solid var(--line);background:rgba(16,18,20,.25);z-index:6;pointer-events:none}
+#knob{position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;background:rgba(236,233,226,.35)}
+
+/* overlays */
+.overlay{position:fixed;inset:0;z-index:10;display:grid;place-items:center;padding:16px max(16px,env(safe-area-inset-right,0px)) 16px max(16px,env(safe-area-inset-left,0px));background:rgba(10,12,13,.35);overflow:auto}
+.sheet{width:min(860px,100%);max-height:calc(100% - 8px);overflow:auto;padding:18px 18px 20px;background:var(--glass2)}
+.sheet header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+.sheet h2{font:700 24px var(--display);letter-spacing:.04em;margin:0;text-wrap:balance}
+.x{background:none;border:1px solid var(--line);border-radius:4px;padding:5px 10px}
+#rosterGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
+.card{position:relative;text-align:left;display:grid;gap:2px;padding:10px 12px 10px 22px;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:5px;min-width:0}
+.card:hover{background:rgba(255,255,255,.09)}
+.card .dot{position:absolute;left:9px;top:12px;width:5px;height:calc(100% - 24px);border-radius:2px}
+.card b{font:700 16px var(--display)} .card small{color:var(--ink);font-size:12px} .card em{font-style:normal;color:var(--dim);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+.card kbd{position:absolute;right:10px;top:10px;font:500 11px var(--ui);opacity:.5}
+#codexBody{max-width:65ch}
+#codexBody .role{color:var(--gold);letter-spacing:.06em;margin-top:2px}
+#codexBody h3{font:600 12px var(--ui);letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:16px 0 6px}
+.abl{display:flex;gap:12px;padding:8px 0;border-top:1px solid var(--line)}
+.abl kbd{flex:none;width:26px;height:26px;display:grid;place-items:center;border:1px solid var(--line);border-radius:4px;font:600 12px var(--ui)}
+.abl b{font-weight:600} .abl span{display:block;color:var(--dim);font-size:11px;letter-spacing:.06em} .abl p{margin:3px 0 0}
+
+#intro{background:linear-gradient(180deg,rgba(10,12,13,.1),rgba(10,12,13,.55))}
+#intro .sheet{width:min(560px,100%);text-align:left}
+#intro h1{font:700 clamp(34px,8vw,54px)/1 var(--display);letter-spacing:.05em;margin:0 0 6px;text-wrap:balance}
+#intro .sub{color:var(--gold);letter-spacing:.14em;text-transform:uppercase;font-size:12px;margin:0 0 14px}
+#intro p{margin:0 0 10px;max-width:60ch}
+#intro .ctrl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12.5px;color:var(--dim);margin:12px 0 16px}
+#intro .ctrl kbd{font:500 12px var(--ui);color:var(--ink)}
+.go{display:flex;gap:8px;flex-wrap:wrap}
+.cta{padding:12px 20px;border-radius:5px;border:1px solid var(--gold);background:rgba(227,189,98,.16);font:700 15px var(--display);letter-spacing:.08em}
+.cta.alt{border-color:var(--line);background:rgba(255,255,255,.04)}
+@media (max-width:600px){
+  #card{min-width:0;padding:8px 10px} #heroName{font-size:17px} #help{display:none}
+  .ab{width:54px;height:54px} .ab.big{width:74px;height:74px} .ab.sm{width:44px;height:44px} .ab .nm{font-size:8.5px}
+}
+@media (prefers-reduced-motion:reduce){.hud,#toast{transition:none}}
+</style>
+
+<div id="stage"></div>
+<div id="hurt"></div><div id="tint" class="tint"></div>
+<div id="toast" class="panel" hidden></div>
+<div id="joy" hidden><div id="knob"></div></div>
+
+<section id="card" class="hud panel" aria-live="polite">
+  <div class="row"><span id="swatch"></span><div><h1 id="heroName">Trae Quill</h1><div id="heroRole"></div></div></div>
+  <div id="heroBeast"></div>
+  <div class="barl"><span>Health</span></div><div class="bar"><i id="hpFill"></i></div>
+  <div class="barl"><span>Breath</span></div><div class="bar"><i id="brFill"></i></div>
+</section>
+
+<section id="top" class="hud">
+  <div id="obj" class="panel"></div>
+  <div class="tbtns">
+    <button class="tbtn" id="rosterBtn">Roster<kbd>Tab</kbd></button>
+    <button class="tbtn" id="codexBtn">Codex<kbd>C</kbd></button>
+    <button class="tbtn" id="partyBtn">Party<kbd>P</kbd></button>
+  </div>
+</section>
+
+<section id="acts" class="hud">
+  <button class="ab" data-act="0"><kbd>Q</kbd><span class="nm"></span><span class="t"></span></button>
+  <button class="ab" data-act="1"><kbd>E</kbd><span class="nm"></span><span class="t"></span></button>
+  <button class="ab" data-act="2"><kbd>R</kbd><span class="nm"></span><span class="t"></span></button>
+  <button class="ab sm touchonly" data-act="jump"><span class="nm">Jump</span></button>
+  <button class="ab sm" id="mantleBtn" data-act="mantle"><kbd>T</kbd><span class="nm">Mantle</span></button>
+  <button class="ab sm" id="beastBtn" data-act="beast"><kbd>F</kbd><span class="nm">Beast</span></button>
+  <button class="ab sm touchonly" data-act="sprint"><span class="nm">Sprint</span></button>
+  <button class="ab big" data-act="atk"><kbd class="deskonly">Click</kbd><span class="nm">Strike</span></button>
+</section>
+
+<section id="help" class="hud panel deskonly">
+  <kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump · click to look and <b>strike</b> · <kbd>Q</kbd><kbd>E</kbd><kbd>R</kbd> abilities · <kbd>T</kbd> Mantle · <kbd>F</kbd> or right-click sends your beast · <kbd>1</kbd>–<kbd>=</kbd> switch bearer · <kbd>Esc</kbd> frees the mouse
+</section>
+
+<div id="intro" class="overlay">
+  <div class="sheet panel">
+    <h1>Beastbound</h1>
+    <p class="sub">The Last Wild · Hearthvale valley</p>
+    <p>Twelve bearers and their companions wait at the Accord camp. Four Crown pylons hold collared beasts in the hills around them. Walk out, fight the Wardens, and bring the pylons down.</p>
+    <p>A companion is not property. Your beast fights beside you because it chooses to.</p>
+    <div class="ctrl deskonly"><kbd>WASD · Shift · Space</kbd><span>Move, sprint, jump</span><kbd>Click · Q E R</kbd><span>Strike and use abilities</span><kbd>T · F</kbd><span>Mantle and companion</span><kbd>Tab · C · P</kbd><span>Roster, codex, party follow</span></div>
+    <div class="ctrl touchonly"><span>Left thumb</span><span>Move</span><span>Right thumb</span><span>Look around</span><span>Buttons</span><span>Strike, abilities, Mantle, beast</span></div>
+    <div class="go"><button class="cta" id="beginBtn">Enter as Trae</button><button class="cta alt" onclick="document.getElementById('roster').hidden=false">Choose bearer</button></div>
+  </div>
+</div>
+
+<div id="roster" class="overlay" hidden>
+  <div class="sheet panel"><header><h2>Choose your bearer</h2><button class="x" data-close>Close</button></header><div id="rosterGrid"></div></div>
+</div>
+<div id="codex" class="overlay" hidden>
+  <div class="sheet panel"><header><h2>Codex</h2><button class="x" data-close>Close</button></header><div id="codexBody"></div></div>
+</div>
+
+<script>if(matchMedia('(pointer:coarse)').matches)document.body.classList.add('touch')</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.149.0/three.min.js"></script>
+<script src="world.js"></script>
+<script src="models.js"></script>
+<script src="data.js"></script>
+<script src="game.js"></script>
