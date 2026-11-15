@@ -1,0 +1,192 @@
+<title>Pinefall Valley</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: full-bleed WebGL flight, thin HUD pinned to corners */
+:root{
+  --ink:#e9eef0; --dim:#a9b7b9; --glass:rgba(18,26,28,.55); --line:rgba(233,238,240,.18); --accent:#cfe3d4;
+  --display:"Cormorant SC",Georgia,serif; --ui:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+html,body{height:100%;margin:0;overflow:hidden;background:#8e9ea3;color:var(--ink)}
+canvas{display:block;touch-action:none}
+.hud{position:fixed;padding:8px 10px;background:var(--glass);backdrop-filter:blur(6px);font:12px/1.4 var(--ui);letter-spacing:.06em;pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,.4)}
+.tl{top:calc(14px + env(safe-area-inset-top,0px));left:max(16px,env(safe-area-inset-left,0px))}
+.tl h1{font:600 28px/1 var(--display);letter-spacing:.08em;margin:0 0 4px;text-wrap:balance}
+.tl p{margin:0;color:var(--dim);text-transform:uppercase;font-size:10px;letter-spacing:.16em}
+.br{bottom:calc(14px + env(safe-area-inset-bottom,0px));right:max(16px,env(safe-area-inset-right,0px));text-align:right;font-variant-numeric:tabular-nums}
+.br b{font-weight:500;color:var(--accent)}
+.bl{bottom:calc(14px + env(safe-area-inset-bottom,0px));left:max(16px,env(safe-area-inset-left,0px));max-width:min(320px,60vw);color:var(--dim);font-size:11px;transition:opacity .8s}
+.bl kbd{font:inherit;border:1px solid var(--line);padding:0 4px;border-radius:3px;color:var(--ink)}
+#start{position:fixed;inset:0;display:grid;place-items:center;background:linear-gradient(rgba(20,28,30,.15),rgba(20,28,30,.45));border:0;color:var(--ink);cursor:pointer;font:600 15px var(--ui);letter-spacing:.3em;text-transform:uppercase}
+#start span{padding:14px 26px;border:1px solid var(--line);background:var(--glass);backdrop-filter:blur(6px)}
+#start:focus-visible span{outline:2px solid var(--accent)}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+SC:wght@600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<div class="hud tl"><h1>Pinefall Valley</h1><p>Glide · dive · skim the pines</p></div>
+<div class="hud br">ALT <b id="alt">0</b> m<br>SPD <b id="spd">0</b> km/h</div>
+<div class="hud bl" id="help">Drag or move the mouse to steer · <kbd>W</kbd><kbd>S</kbd> pitch · <kbd>A</kbd><kbd>D</kbd> turn · <kbd>Shift</kbd> dive boost · <kbd>Space</kbd> brake. Let go and the camera glides on its own.</div>
+<button id="start"><span>Take flight</span></button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(()=>{
+// ---------- noise ----------
+const P=new Uint8Array(512);{const p=[...Array(256).keys()];let s=1337;for(let i=255;i>0;i--){s=(s*16807)%2147483647;const j=s%(i+1);[p[i],p[j]]=[p[j],p[i]];}for(let i=0;i<512;i++)P[i]=p[i&255];}
+const G=[[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+function n2(x,y){const F=.366025403,Gs=.211324865;const s=(x+y)*F,i=Math.floor(x+s),j=Math.floor(y+s),t=(i+j)*Gs;
+ const x0=x-(i-t),y0=y-(j-t),i1=x0>y0?1:0,j1=1-i1;const x1=x0-i1+Gs,y1=y0-j1+Gs,x2=x0-1+2*Gs,y2=y0-1+2*Gs;
+ let n=0;const c=(gx,gy,xx,yy)=>{let tt=.5-xx*xx-yy*yy;if(tt<0)return 0;const g=G[P[gx+P[gy]]&7];tt*=tt;return tt*tt*(g[0]*xx+g[1]*yy)};
+ const ii=i&255,jj=j&255;n=c(ii,jj,x0,y0)+c(ii+i1,jj+j1,x1,y1)+c(ii+1,jj+1,x2,y2);return 70*n;}
+const fbm=(x,y,o)=>{let a=0,f=1,amp=1,s=0;for(let k=0;k<o;k++){a+=amp*n2(x*f,y*f);s+=amp;f*=2.03;amp*=.5}return a/s};
+const ridge=(x,y,o)=>{let a=0,f=1,amp=1,s=0,w=1;for(let k=0;k<o;k++){let v=1-Math.abs(n2(x*f,y*f));v*=v*w;w=Math.min(1,v*1.6);a+=amp*v;s+=amp;f*=2.1;amp*=.5}return a/s};
+
+// ---------- world height ----------
+const SIZE=9000, HALF=SIZE/2;
+function height(x,z){
+  const r=Math.hypot(x,z)/HALF;                       // valley in middle, peaks around
+  const valley=fbm(x*.00035,z*.00035,4)*120+fbm(x*.002,z*.002,3)*35;
+  const mtn=Math.pow(ridge(x*.00028+9,z*.00028-3,6),2.2)*1500;
+  const bowl=THREE.MathUtils.smoothstep(r,.18,.85);
+  const river=Math.max(0,1-Math.abs(n2(x*.0004+40,z*.0004)*3.2))*-60;
+  return valley+river+mtn*(.18+.82*bowl)+bowl*bowl*500;
+}
+
+// ---------- renderer / scene ----------
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));renderer.setSize(innerWidth,innerHeight);
+renderer.outputEncoding=THREE.sRGBEncoding;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
+document.body.prepend(renderer.domElement);
+const scene=new THREE.Scene();
+const FOG=new THREE.Color(0xa8b6b8);scene.fog=new THREE.FogExp2(FOG,.00022);
+const camera=new THREE.PerspectiveCamera(68,innerWidth/innerHeight,1,14000);
+
+// sky dome
+const skyMat=new THREE.ShaderMaterial({side:THREE.BackSide,depthWrite:false,fog:false,uniforms:{top:{value:new THREE.Color(0x6f8a9a)},mid:{value:FOG.clone()},sun:{value:new THREE.Vector3(.4,.35,-.85).normalize()}},
+ vertexShader:`varying vec3 d;void main(){d=normalize(position);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+ fragmentShader:`uniform vec3 top,mid,sun;varying vec3 d;void main(){float h=clamp(d.y*2.2,0.,1.);vec3 c=mix(mid,top,h);c+=vec3(1.,.95,.85)*pow(max(dot(d,sun),0.),24.)*.35;gl_FragColor=vec4(c,1.);}`});
+const sky=new THREE.Mesh(new THREE.SphereGeometry(12000,32,16),skyMat);scene.add(sky);
+
+scene.add(new THREE.HemisphereLight(0xd8e4ea,0x3a4636,.75));
+const sunL=new THREE.DirectionalLight(0xfff1dc,1.25);sunL.position.set(4,3.5,-8.5);scene.add(sunL);
+
+// ---------- terrain ----------
+const SEG=320;
+const tg=new THREE.PlaneGeometry(SIZE,SIZE,SEG,SEG);tg.rotateX(-Math.PI/2);
+const pos=tg.attributes.position,cols=new Float32Array(pos.count*3);
+for(let i=0;i<pos.count;i++){pos.setY(i,height(pos.getX(i),pos.getZ(i)))}
+tg.computeVertexNormals();
+const nrm=tg.attributes.normal,c=new THREE.Color();
+const grass=new THREE.Color(0x48552f),forest=new THREE.Color(0x26331f),rock=new THREE.Color(0x6e6c66),rockD=new THREE.Color(0x4d4c49),snow=new THREE.Color(0xf2f4f6),dirt=new THREE.Color(0x7a7457);
+for(let i=0;i<pos.count;i++){
+  const x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i),ny=nrm.getY(i);
+  const v=fbm(x*.01,z*.01,2)*.5+.5;
+  c.copy(grass).lerp(forest,THREE.MathUtils.smoothstep(v,.3,.7));
+  if(y<10)c.lerp(dirt,.5);
+  const steep=1-THREE.MathUtils.smoothstep(ny,.62,.82);
+  c.lerp(v>.5?rock:rockD,steep);
+  const snowLine=1150+fbm(x*.003,z*.003,3)*160;
+  const s=THREE.MathUtils.smoothstep(y,snowLine-60,snowLine+60)*THREE.MathUtils.smoothstep(ny,.5,.75);
+  c.lerp(snow,s);
+  cols.set([c.r,c.g,c.b],i*3);
+}
+tg.setAttribute('color',new THREE.BufferAttribute(cols,3));
+const terrain=new THREE.Mesh(tg,new THREE.MeshLambertMaterial({vertexColors:true}));scene.add(terrain);
+
+// water in river beds
+const water=new THREE.Mesh(new THREE.PlaneGeometry(SIZE,SIZE),new THREE.MeshPhongMaterial({color:0x5c7378,shininess:80,specular:0x9fb2b4,transparent:true,opacity:.85}));
+water.rotation.x=-Math.PI/2;water.position.y=-38;scene.add(water);
+
+// ---------- pines ----------
+const TREES=window.innerWidth<700?22000:40000;
+function cone(r,h,y,col){const g=new THREE.ConeGeometry(r,h,7,1);g.translate(0,y,0);const a=new Float32Array(g.attributes.position.count*3);
+  for(let i=0;i<g.attributes.position.count;i++){const k=.75+.25*(g.attributes.position.getY(i)-y+h/2)/h;a.set([col.r*k,col.g*k,col.b*k],i*3)}g.setAttribute('color',new THREE.BufferAttribute(a,3));return g}
+const pineCol=new THREE.Color(0x24331f);
+const parts=[cone(5,9,6,pineCol),cone(4,8,11,pineCol),cone(2.8,7,16,pineCol),cone(.8,5,2,new THREE.Color(0x3b2c22))];
+const tMat=new THREE.MeshLambertMaterial({vertexColors:true});
+const meshes=parts.map(g=>{const m=new THREE.InstancedMesh(g,tMat,TREES);m.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(TREES*3),3);scene.add(m);return m});
+const dm=new THREE.Object3D(),tc=new THREE.Color();let placed=0,guard=0;
+let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
+while(placed<TREES&&guard++<TREES*12){
+  const x=(rnd()-.5)*SIZE*.96,z=(rnd()-.5)*SIZE*.96,y=height(x,z);
+  if(y<-5||y>980+fbm(x*.003,z*.003,3)*150)continue;
+  const e=6,sl=Math.abs(height(x+e,z)-y)+Math.abs(height(x,z+e)-y);if(sl>9)continue;
+  const dens=fbm(x*.0016,z*.0016,3);if(dens<-.35+rnd()*.2)continue;
+  const s=.9+rnd()*1.4*(1-y/1500);
+  dm.position.set(x,y-1,z);dm.rotation.set((rnd()-.5)*.08,rnd()*6.28,(rnd()-.5)*.08);dm.scale.set(s,s*(.9+rnd()*.5),s);dm.updateMatrix();
+  tc.setHSL(.27+rnd()*.06,.3+rnd()*.15,.45+rnd()*.35);
+  meshes.forEach((m,k)=>{m.setMatrixAt(placed,dm.matrix);m.setColorAt(placed,k===3?new THREE.Color(1,1,1):tc)});placed++;
+}
+meshes.forEach(m=>{m.count=placed;m.instanceMatrix.needsUpdate=true;m.instanceColor.needsUpdate=true});
+
+// ---------- drifting mist ----------
+const mc=document.createElement('canvas');mc.width=mc.height=128;const mx=mc.getContext('2d');
+const gr=mx.createRadialGradient(64,64,0,64,64,64);gr.addColorStop(0,'rgba(255,255,255,.55)');gr.addColorStop(1,'rgba(255,255,255,0)');mx.fillStyle=gr;mx.fillRect(0,0,128,128);
+const mistTex=new THREE.CanvasTexture(mc);const mists=[];
+for(let i=0;i<40;i++){const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:mistTex,color:0xdfe6e8,transparent:true,opacity:.18,depthWrite:false}));
+  const x=(rnd()-.5)*SIZE*.8,z=(rnd()-.5)*SIZE*.8;sp.position.set(x,height(x,z)+120+rnd()*250,z);const s=500+rnd()*700;sp.scale.set(s,s*.45,1);scene.add(sp);mists.push(sp)}
+
+// ---------- flight ----------
+const st={p:new THREE.Vector3(-300,420,1500),yaw:-.15,pitch:-.12,roll:0,speed:70};
+const keys={};addEventListener('keydown',e=>{keys[e.code]=1;idle=0});addEventListener('keyup',e=>keys[e.code]=0);
+let ptr=null,idle=99,steer={x:0,y:0};
+const el=renderer.domElement;
+el.addEventListener('pointerdown',e=>{ptr={x:e.clientX,y:e.clientY};el.setPointerCapture(e.pointerId)});
+el.addEventListener('pointermove',e=>{
+  if(ptr){steer.x=THREE.MathUtils.clamp((e.clientX-ptr.x)/(innerWidth*.25),-1,1);steer.y=THREE.MathUtils.clamp((e.clientY-ptr.y)/(innerHeight*.25),-1,1);idle=0}
+  else if(e.pointerType==='mouse'&&started){steer.x=(e.clientX/innerWidth-.5)*2;steer.y=(e.clientY/innerHeight-.5)*2;if(Math.abs(steer.x)>.08||Math.abs(steer.y)>.08)idle=0}});
+const end=()=>{ptr=null;steer.x=steer.y=0};el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
+el.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse')end()});
+
+let started=false;const startBtn=document.getElementById('start');
+startBtn.onclick=()=>{started=true;startBtn.hidden=true;setTimeout(()=>document.getElementById('help').style.opacity=.35,9000)};
+
+const fwd=new THREE.Vector3(),q=new THREE.Quaternion(),eul=new THREE.Euler(0,0,0,'YXZ');
+const altEl=document.getElementById('alt'),spdEl=document.getElementById('spd');
+let last=performance.now(),hudT=0,autoT=0;
+function step(dt){
+  idle+=dt;
+  let turn=0,pitchIn=0;
+  if(keys.KeyA||keys.ArrowLeft)turn+=1;if(keys.KeyD||keys.ArrowRight)turn-=1;
+  if(keys.KeyW||keys.ArrowUp)pitchIn-=1;if(keys.KeyS||keys.ArrowDown)pitchIn+=1;
+  turn-=Math.abs(steer.x)>.06?steer.x:0;pitchIn-=Math.abs(steer.y)>.06?steer.y:0;
+  const ground=height(st.p.x,st.p.z);
+  if(idle>4){ // autopilot: weave over the valley, dip toward the trees, climb past ridges
+    autoT+=dt;
+    const toC=Math.atan2(-st.p.x,-st.p.z);let dy=toC-st.yaw;dy=Math.atan2(Math.sin(dy),Math.cos(dy));
+    const far=Math.hypot(st.p.x,st.p.z)/HALF;
+    turn=THREE.MathUtils.clamp(dy*(far>.45?1.4:.25)+Math.sin(autoT*.21)*.55,-1,1);
+    const ahead=height(st.p.x-Math.sin(st.yaw)*300,st.p.z-Math.cos(st.yaw)*300);
+    const want=Math.max(ground,ahead)+90+Math.sin(autoT*.33)*60;
+    pitchIn=THREE.MathUtils.clamp((want-st.p.y)*.012,-1,1);
+  }
+  st.yaw+=turn*dt*.85;
+  st.pitch=THREE.MathUtils.damp(st.pitch,THREE.MathUtils.clamp(pitchIn*.75,-1.1,.6),2.2,dt);
+  st.roll=THREE.MathUtils.damp(st.roll,turn*.55,3,dt);
+  // glide physics: diving builds speed, climbing bleeds it
+  let target=75-st.pitch*140;if(keys.ShiftLeft||keys.ShiftRight)target+=90;if(keys.Space)target=35;
+  st.speed=THREE.MathUtils.damp(st.speed,THREE.MathUtils.clamp(target,30,260),.9,dt);
+  eul.set(st.pitch,st.yaw,0);q.setFromEuler(eul);fwd.set(0,0,-1).applyQuaternion(q);
+  st.p.addScaledVector(fwd,st.speed*dt);
+  // terrain + bounds
+  const g2=height(st.p.x,st.p.z);
+  if(st.p.y<g2+22){st.p.y=THREE.MathUtils.damp(st.p.y,g2+22,10,dt);st.pitch=Math.max(st.pitch,.15)}
+  st.p.y=Math.min(st.p.y,2600);
+  const r=Math.hypot(st.p.x,st.p.z);if(r>HALF*.8){const a=Math.atan2(-st.p.x,-st.p.z);let d=a-st.yaw;d=Math.atan2(Math.sin(d),Math.cos(d));st.yaw+=d*dt*1.2}
+  camera.position.copy(st.p);
+  camera.quaternion.setFromEuler(new THREE.Euler(st.pitch,st.yaw,st.roll,'YXZ'));
+  camera.fov=THREE.MathUtils.damp(camera.fov,62+st.speed*.07,3,dt);camera.updateProjectionMatrix();
+  sky.position.copy(st.p);
+  return g2;
+}
+function loop(now){
+  const dt=Math.min(.05,(now-last)/1000);last=now;
+  const g=step(dt);
+  mists.forEach((m,i)=>{m.position.x+=Math.sin(i)*dt*6;m.material.opacity=.2*THREE.MathUtils.clamp((m.position.distanceTo(st.p)-300)/900,0,1)});
+  if((hudT+=dt)>.15){hudT=0;altEl.textContent=Math.round(st.p.y-g);spdEl.textContent=Math.round(st.speed*3.6*.6)}
+  renderer.render(scene,camera);requestAnimationFrame(loop);
+}
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+requestAnimationFrame(loop);
+})();
+</script>
