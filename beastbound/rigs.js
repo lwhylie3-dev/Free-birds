@@ -8,7 +8,10 @@ const store={};
 BB.loadAssets=function(onProgress){
   if(!THREE.GLTFLoader||!THREE.SkeletonUtils)return Promise.resolve(false);
   const L=new THREE.GLTFLoader(); const keys=Object.keys(ASSETS); let done=0;
-  return Promise.all(keys.map(k=>new Promise(res=>L.load(ASSETS[k],g=>{store[k]=g;onProgress&&onProgress(++done/keys.length);res()},undefined,()=>{onProgress&&onProgress(++done/keys.length);res()}))))
+  const buf=k=>{const s=atob(BB.GLB[k]);const u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u.buffer};
+  return Promise.all(keys.map(k=>new Promise(res=>{const fin=()=>{onProgress&&onProgress(++done/keys.length);res()};
+    if(!BB.GLB||!BB.GLB[k])return fin();
+    try{L.parse(buf(k),'',g=>{store[k]=g;fin()},fin)}catch(e){fin()}})))
     .then(()=>{BB.RIGS=!!(store.rpm&&store.soldier);prepClips();return BB.RIGS});
 };
 
