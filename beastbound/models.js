@@ -75,6 +75,7 @@ const HAIR={
   helm(head,m){mesh(head,sph(.135,18,12),m,0,.02,0,0,0,0,1,1.08,1.1);mesh(head,box(.2,.06,.02),M(0x9fd2ff,{metalness:1,roughness:.05,emissive:0x264a6a,emissiveIntensity:.6}),0,.01,.13)},
 };
 
+BB.HAIR=HAIR;
 BB.buildHuman=function(o){
   const s=o.scale||1, w=o.build||1;
   const root=new THREE.Group(), B={root};

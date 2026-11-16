@@ -1,5 +1,6 @@
 // Beastbound Wilds — game loop, controls, combat, companions, Crown forces.
-(function(){
+window.BB=window.BB||{};
+BB.boot=function(){
 const BB=window.BB, PI=Math.PI, V3=THREE.Vector3;
 const $=s=>document.querySelector(s);
 const TOUCH=matchMedia('(pointer:coarse)').matches;
@@ -46,12 +47,17 @@ function placeGear(h,def){
   def.gear.forEach(([item,slot,opt])=>{
     const w=BB.W[item](opt||{});
     if(slot==='R'||slot==='L'){
-      if(item==='shield'||item==='segShield'){B['el'+slot].add(w);w.position.set(slot==='L'?-.09:.09,-.16,0);w.rotation.set(0,slot==='L'?-PI/2:PI/2,0)}
+      if(h.rig){
+        if(item==='shield'||item==='segShield'){B['arm'+slot].add(w)}
+        else if(item==='pistol'){B['gun'+slot].add(w);w.rotation.x=-PI/2}
+        else B['grip'+slot].add(w);
+      }
+      else if(item==='shield'||item==='segShield'){B['el'+slot].add(w);w.position.set(slot==='L'?-.09:.09,-.16,0);w.rotation.set(0,slot==='L'?-PI/2:PI/2,0)}
       else{B['grip'+slot].add(w); if(item==='fan')w.rotation.set(0,0,0)}
       h.items[slot].push(w);
     }else if(slot.startsWith('back')){const sg=backN++%2?-1:1;B.back.add(w);
-      if(item==='bow'){w.position.set(0,.05,-.02);w.rotation.set(0,PI/2,.5)}
-      else{w.position.set(.13*sg,.3,0);w.rotation.set(0,0,PI-.55*sg)}}
+      if(item==='bow'){w.position.set(0,.05,.02);w.rotation.set(0,PI/2,.5)}
+      else{w.position.set(.13*sg,h.rig?.22:.3,h.rig?.02:0);w.rotation.set(0,0,PI-.55*sg)}}
     else{B[slot].add(w);w.position.set(0,0,0);w.rotation.set(.15,0,PI-(slot==='hipL'?-.2:.2))}
     w.traverse(m=>{if(m.isMesh)m.castShadow=true});
   });
@@ -60,18 +66,18 @@ function placeGear(h,def){
   if(def.id==='danny'){const l=new THREE.PointLight(0xff6a1a,0,5,2);B.handR.add(l);h.extra.heat=l}
 }
 function makeHero(def,i){
-  const h=BB.buildHuman(def.look); BB.buildMantle(h,def.mantle); placeGear(h,def);
+  const h=BB.RIGS?BB.buildRiggedHero(def):BB.buildHuman(def.look); if(!h.rig)BB.buildMantle(h,def.mantle); placeGear(h,def);
   scene.add(h.root);
-  const beast=BB.BEASTS[def.beast](); scene.add(beast.root);
+  const beast=(BB.RIGS&&BB.buildRiggedBeast(def.beast))||BB.BEASTS[def.beast](); scene.add(beast.root);
   const a=i/BB.ROSTER.length*PI*2+.2, r=12.5;
   const pos=new V3(BB.CAMP.x+Math.cos(a)*r,0,BB.CAMP.z+Math.sin(a)*r); pos.y=H(pos.x,pos.z);
   const e={def,h,beast,pos,home:pos.clone(),yaw:Math.atan2(BB.CAMP.x-pos.x,BB.CAMP.z-pos.z),vel:new V3(),grounded:true,
     st:{speed:0,attackT:-1,combo:0,grounded:true},bst:{speed:0},bpos:pos.clone().add(new V3(Math.cos(a)*(def.beast==='dragon'?8:3.4),0,Math.sin(a)*(def.beast==='dragon'?8:3.4))),byaw:0,
     hp:100,maxhp:100,breath:100,cds:{},buffs:{},mantleOn:false,marks:[],echo:0,radius:.45,team:'hero',idx:i,beastBusy:0,beastCd:0,lionRest:0};
   e.byaw=e.yaw;
-  if(beast.kind==='bird'){e.bpos.y=pos.y+8}
+  if(beast.kind==='bird'||beast.kind==='gbird'){e.bpos.y=pos.y+8}
   if(beast.kind==='snake'){beast.root.userData.headPos=e.bpos;for(let k=0;k<260;k++)beast.trail.push(new V3(e.bpos.x+Math.sin(k*.08)*1.6,0,e.bpos.z-k*.12));}
-  if(def.extra==='harpy'){e.harpy=BB.BEASTS.harpy();scene.add(e.harpy.root);e.hpos=pos.clone().add(new V3(0,12,0));e.hst={};e.hdive=null}
+  if(def.extra==='harpy'){e.harpy=(BB.RIGS&&BB.buildRiggedBeast('harpy'))||BB.BEASTS.harpy();scene.add(e.harpy.root);e.hpos=pos.clone().add(new V3(0,12,0));e.hst={};e.hdive=null}
   heroes.push(e); return e;
 }
 BB.ROSTER.forEach((d,i)=>makeHero(d,i));
@@ -81,7 +87,8 @@ let active=heroes[0], party=false;
 const enemies=[];
 function makeEnemy(type,op,k){
   let model,isQuad=false;
-  if(type==='warden'){model=BB.buildHuman({skin:0x9a7a62,hair:'helm',hairC:0xd2d6da,top:0xbfc4c9,pants:0x5a5e64,boots:0x2a2c30,belt:0x8a8f96,sleeves:'long'});model.B.gripR.add(BB.W.baton());}
+  if(type==='warden'&&BB.RIGS){model=BB.buildRiggedWarden();model.B.gripR.add(BB.W.baton());}
+  else if(type==='warden'){model=BB.buildHuman({skin:0x9a7a62,hair:'helm',hairC:0xd2d6da,top:0xbfc4c9,pants:0x5a5e64,boots:0x2a2c30,belt:0x8a8f96,sleeves:'long'});model.B.gripR.add(BB.W.baton());}
   else{model=BB.BEASTS.sentinel();isQuad=true}
   const root=isQuad?model.root:model.root; scene.add(root);
   const a=k*2.1+op.o.x, r=6+(k%3)*4;
@@ -345,14 +352,14 @@ function updateBeast(e,dt,t){
     if(!resting&&e.beastCd<=0){const n=nearestEnemy(e.pos,9);if(n&&n.state!=='idle'){e.beastTarget=n;e.beastBusy=3;e.beastCd=2.6}}}
   if(e.beastShield>0){e.beastShield-=dt;tgt=e.pos.clone().addScaledVector(fwd(e.yaw),-2.2);attackMode=false}
   if(!tgt){const side=fwd(e.yaw-PI/2).multiplyScalar(size*.9+.6),back=fwd(e.yaw).multiplyScalar(-size*.5);tgt=bTmp.copy(e.pos).add(side).add(back)}
-  if(kind==='bird'){
+  if(kind==='bird'||kind==='gbird'){
     const ty=(attackMode?H(tgt.x,tgt.z)+1.5:e.pos.y+7+Math.sin(t*.7+e.idx)*1.5);
     const orbit=attackMode?0:1;const ox=Math.cos(t*.6+e.idx)*6*orbit,oz=Math.sin(t*.6+e.idx)*6*orbit;
     const goal=new V3(tgt.x+ox,ty,tgt.z+oz);const d=goal.clone().sub(e.bpos);const dist=d.length();
     const spd=attackMode?30:Math.min(16,dist*1.5);if(dist>.1)e.bpos.addScaledVector(d.normalize(),Math.min(dist,spd*dt));
     const yaw=Math.atan2(d.x,d.z);e.byaw+=angDiff(yaw,e.byaw)*Math.min(1,dt*3);
     if(attackMode&&dist<1.8){hit(e.beastTarget,18,e,3,{color:0x9fd8ff});e.beastBusy=0;e.beastTarget=null}
-    R.root.position.copy(e.bpos);R.root.rotation.y=e.byaw;BB.animBeast(R,{flap:attackMode?.4:1,bank:angDiff(yaw,e.byaw)*.6,dive:attackMode&&dist<8},dt,t);
+    R.root.position.copy(e.bpos);R.root.rotation.y=e.byaw;animAny(R,{flap:attackMode?.4:1,bank:angDiff(yaw,e.byaw)*.6,dive:attackMode&&dist<8},dt,t);
     return;
   }
   const d=bTmp.copy(tgt).sub(e.bpos);d.y=0;const dist=d.length();
@@ -376,8 +383,9 @@ function updateBeast(e,dt,t){
     // align body pitch with slope
     const ahead=H(e.bpos.x+Math.sin(e.byaw)*size*.5,e.bpos.z+Math.cos(e.byaw)*size*.5),behind=H(e.bpos.x-Math.sin(e.byaw)*size*.5,e.bpos.z-Math.cos(e.byaw)*size*.5);
     R.root.rotation.x=-Math.atan2(ahead-behind,size)*.8;}
-  BB.animBeast(R,e.bst,dt,t);
+  animAny(R,e.bst,dt,t);
 }
+function animAny(R,st,dt,t){if(R.mixer)BB.animRiggedBeast(R,st,dt);else BB.animBeast(R,st,dt,t)}
 function updateHarpy(e,dt,t){
   const R=e.harpy;let goal,dive=false;
   if(e.hdive){const d=e.hdive;d.t+=dt;
@@ -390,7 +398,7 @@ function updateHarpy(e,dt,t){
   else{goal=new V3(e.pos.x+Math.cos(t*.45)*11,e.pos.y+14+Math.sin(t*.9)*2,e.pos.z+Math.sin(t*.45)*11);const v=goal.sub(e.hpos);const L=v.length();e.hpos.addScaledVector(v.normalize(),Math.min(L,18*dt))}
   const prev=R.root.position.clone();R.root.position.copy(e.hpos);const mv=e.hpos.clone().sub(prev);
   if(mv.lengthSq()>1e-5)R.root.rotation.y=Math.atan2(mv.x,mv.z);
-  BB.animBeast(R,{flap:dive?0:.8,bank:-.35,dive},dt,t);
+  animAny(R,{flap:dive?0:.8,bank:-.35,dive},dt,t);
 }
 
 // ---------- enemies ----------
@@ -429,7 +437,7 @@ function updateEnemy(en,dt,t){
   en.root.position.copy(en.pos);en.root.rotation.y=en.yaw;
   if(en.st.attackT>=0){en.st.attackT+=dt/en.st.atkDur;if(en.st.attackT>1)en.st.attackT=-1}
   en.st.speed=Math.hypot(en.vel.x,en.vel.z);en.st.grounded=true;
-  if(en.isQuad){en.st.pounce=en.wind>0?1:0;BB.animBeast(en.model,en.st,dt,t)}else BB.animHuman(en.model,en.st,dt);
+  if(en.isQuad){en.st.pounce=en.wind>0?1:0;BB.animBeast(en.model,en.st,dt,t)}else if(en.model.animate)en.model.animate(en.st,dt);else BB.animHuman(en.model,en.st,dt);
   en.bar.position.set(en.pos.x,en.pos.y+(en.isQuad?2.6:2.35),en.pos.z);
   if(en.reveal>0){en.reveal-=dt;en.bar.visible=true;if(!en.revealMark){const m=new THREE.Mesh(new THREE.RingGeometry(.9,1.1,24),basic(0xff5a4a,.9));m.rotation.x=-PI/2;m.material.depthTest=false;m.renderOrder=9;scene.add(m);en.revealMark=m}
     en.revealMark.visible=true;en.revealMark.position.set(en.pos.x,en.pos.y+.1,en.pos.z);en.revealMark.scale.setScalar(1+Math.sin(t*6)*.1)}
@@ -483,7 +491,7 @@ function updateHero(e,dt,t){
   s.aimBoth=s.aim?true:s.aimBoth;
   s.block=e.buffs.bulwark>0||e.buffs.guard>0;
   e.h.root.position.copy(e.pos);e.h.root.rotation.y=e.yaw;
-  BB.animHuman(e.h,s,dt);
+  if(e.h.animate)e.h.animate(s,dt);else BB.animHuman(e.h,s,dt);
   // per-hero visuals
   if(e.extra?.swords){}
   if(e.h.extra.swords){const on=e.buffs.blades>0;e.h.extra.swords.forEach(w=>w.visible=on);e.h.items.R.concat(e.h.items.L).forEach(w=>w.visible=!on)}
@@ -548,7 +556,7 @@ function switchTo(i){if(!heroes[i]||heroes[i]===active)return;const prev=active;
 // ---------- start ----------
 buildPanels();refreshHUD();updateObjective();
 function begin(){started=true;$('#intro').hidden=true;document.body.classList.add('playing');toast('Break the four Crown pylons. Free the collared.',3.5)}
-$('#beginBtn').onclick=begin;
+$('#beginBtn').onclick=begin;$('#beginBtn').disabled=false;$('#beginBtn').textContent='Enter as Trae';
 
 // ---------- main loop ----------
 let last=performance.now(),tintT=0,hudT=0;
@@ -582,5 +590,5 @@ function loop(now){
 camYaw=active.yaw+PI+.6;camPitch=.22;camDist=9;
 requestAnimationFrame(loop);
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
-BB.debug={renderer,heroes,enemies,get active(){return active},switchTo,useAbility,attack,world};
-})();
+BB.debug={renderer,heroes,enemies,get active(){return active},switchTo,useAbility,attack,world,camera,scene,setCam(y,p,d){camYaw=y;camPitch=p;camDist=d}};
+};

@@ -96,6 +96,8 @@ body.touch .ab kbd,body.touch .tbtn kbd,body.touch .deskonly{display:none}
 #intro .ctrl kbd{font:500 12px var(--ui);color:var(--ink)}
 .go{display:flex;gap:8px;flex-wrap:wrap}
 .cta{padding:12px 20px;border-radius:5px;border:1px solid var(--gold);background:rgba(227,189,98,.16);font:700 15px var(--display);letter-spacing:.08em}
+.cta:disabled{opacity:.6;cursor:wait}
+#intro .credit{font-size:11px;color:var(--dim);margin:0 0 12px}
 .cta.alt{border-color:var(--line);background:rgba(255,255,255,.04)}
 @media (max-width:600px){
   #card{min-width:0;padding:8px 10px} #heroName{font-size:17px} #help{display:none}
@@ -148,7 +150,8 @@ body.touch .ab kbd,body.touch .tbtn kbd,body.touch .deskonly{display:none}
     <p>A companion is not property. Your beast fights beside you because it chooses to.</p>
     <div class="ctrl deskonly"><kbd>WASD · Shift · Space</kbd><span>Move, sprint, jump</span><kbd>Click · Q E R</kbd><span>Strike and use abilities</span><kbd>T · F</kbd><span>Mantle and companion</span><kbd>Tab · C · P</kbd><span>Roster, codex, party follow</span></div>
     <div class="ctrl touchonly"><span>Left thumb</span><span>Move</span><span>Right thumb</span><span>Look around</span><span>Buttons</span><span>Strike, abilities, Mantle, beast</span></div>
-    <div class="go"><button class="cta" id="beginBtn">Enter as Trae</button><button class="cta alt" onclick="document.getElementById('roster').hidden=false">Choose bearer</button></div>
+    <p class="credit">Models: Ready Player Me avatar and Mixamo soldier from the three.js examples; wolf from the glTF Fox by PixelMannen, tomkranis, @AsoboStudio and @scurest (CC BY 4.0); raven and harpy from three.js example birds by mirada.</p>
+    <div class="go"><button class="cta" id="beginBtn" disabled>Loading models</button><button class="cta alt" onclick="document.getElementById('roster').hidden=false">Choose bearer</button></div>
   </div>
 </div>
 
@@ -160,8 +163,14 @@ body.touch .ab kbd,body.touch .tbtn kbd,body.touch .deskonly{display:none}
 </div>
 
 <script>if(matchMedia('(pointer:coarse)').matches)document.body.classList.add('touch')</script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.149.0/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.147.0/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/utils/SkeletonUtils.js"></script>
 <script src="world.js"></script>
 <script src="models.js"></script>
 <script src="data.js"></script>
+<script src="rigs.js"></script>
 <script src="game.js"></script>
+<script>
+BB.loadAssets(p=>{document.getElementById('beginBtn').textContent='Loading models '+Math.round(p*100)+'%'}).then(()=>setTimeout(BB.boot,30)).catch(()=>BB.boot());
+</script>
