@@ -2,3 +2,5 @@ node_modules/
 dist/
 .wrangler/
 .dev.vars
+# Local secrets written by `elevenlabs onboard`
+/.env.local
